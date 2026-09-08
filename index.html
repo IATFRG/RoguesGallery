@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Profile Directory</title><link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="site-header"><div class="container header-content"><div><h1>Profile Directory</h1><p>Add, search, filter, and organize profiles.</p></div><button id="logoutButton" class="button secondary" type="button">Log Out</button></div></header>
+<main class="container">
+<section class="panel" aria-labelledby="formHeading">
+<h2 id="formHeading">Add Profile</h2>
+<form id="profileForm">
+<input type="hidden" id="editingId">
+<div class="form-grid">
+<div class="form-group"><label for="photo">Picture</label><input type="file" id="photo" accept="image/jpeg,image/png,image/webp"><p class="help-text">JPG, PNG, or WebP. Images are resized and compressed before saving.</p></div>
+<div class="form-group"><label for="fullName">Full Name</label><input type="text" id="fullName" required autocomplete="name"></div>
+<div class="form-group"><label for="dob">D.O.B</label><input type="date" id="dob" required></div>
+<div class="form-group"><label for="rank">Role</label><select id="rank" required><option value="">Select a role</option><option>Leader</option><option>Sub Leader</option><option>Enforcer</option><option>Shooter</option><option>Soldier</option><option>Runner</option><option>Associate</option></select></div>
+<div class="form-group"><label for="group">Group</label><select id="group" required><option value="">Select a group</option><option>Sixx Gang</option><option>Rasta City Gang</option><option>Alien Gang</option><option>1800 Gang</option><option>ABG Gang</option><option>Resistance Gang</option><option>Muslim City Gang</option></select></div>
+</div>
+<div class="button-row"><button type="submit" class="button primary" id="saveButton">Add Profile</button><button type="button" class="button secondary" id="cancelEditButton" hidden>Cancel Edit</button></div>
+</form>
+<div id="status" class="status" role="status" aria-live="polite"></div>
+</section>
+
+<section class="panel" aria-labelledby="searchHeading">
+<h2 id="searchHeading">Search and Filter</h2>
+<div class="filter-grid">
+<div class="form-group"><label for="searchInput">Search by name</label><input type="search" id="searchInput" placeholder="Enter a name"></div>
+<div class="form-group"><label for="filterGroup">Filter by group</label><select id="filterGroup"><option value="">All Groups</option><option>Sixx Gang</option><option>Rasta City Gang </option><option>Alien Gang</option><option>1800 Gang</option><option>ABG Gang</option><option>Resistance Gang</option><option>Muslim City Gang</option></select></div>
+<div class="form-group"><label for="filterRank">Filter by role</label><select id="filterRank"><option value="">All Roles</option><option>Leader</option><option>Sub Leader</option><option>Enforcer</option><option>Shooter</option><option>Soldier</option><option>Runner</option><option>Associate</option></select></div>
+</div>
+</section>
+
+<section class="panel" aria-labelledby="backupHeading">
+<h2 id="backupHeading">Backup and Restore</h2>
+<p class="help-text">Export your profiles as a backup file or import a previously created backup. Keep backups private.</p>
+<div class="button-row"><button type="button" id="exportButton" class="button primary">Export Backup</button><label for="importInput" class="button secondary import-label">Import Backup</label><input type="file" id="importInput" accept=".json,application/json" class="visually-hidden"></div>
+<div id="backupStatus" class="status" role="status" aria-live="polite"></div>
+</section>
+
+<section aria-labelledby="profilesHeading"><h2 id="profilesHeading">All Profiles</h2><div id="emptyMessage" class="empty-message">No profiles found.</div><div id="profiles" class="profiles-grid" aria-live="polite"></div></section>
+
+<section class="groups-section" aria-labelledby="groupsHeading"><h2 id="groupsHeading">Browse Groups</h2><div class="group-grid">
+<a href="group.html?group=Group%20A" class="group-card"><h3>Sixx Gang</h3><p>View profiles.</p></a>
+<a href="group.html?group=Group%20B" class="group-card"><h3>Rasta City Gang </h3><p>View profiles.</p></a>
+<a href="group.html?group=Group%20C" class="group-card"><h3>Alien Gang</h3><p>View profiles.</p></a>
+<a href="group.html?group=Group%20D" class="group-card"><h3>1800 Gang</h3><p>View profiles.</p></a>
+<a href="group.html?group=Group%20E" class="group-card"><h3>ABG Gang</h3><p>View profiles.</p></a>
+<a href="group.html?group=Group%20F" class="group-card"><h3>Resistance Gang</h3><p>View profiles.</p></a>
+<a href="group.html?group=Group%20G" class="group-card"><h3>Muslim City Gang</h3><p>View profiles.</p></a>
+</div></section>
+</main>
+<script src="app.js"></script>
+</body></html>
