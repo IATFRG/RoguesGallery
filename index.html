@@ -1,38 +1,20 @@
 <!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Profile Directory</title>
-<link rel="stylesheet" href="styles.css">
-</head>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Rogue Gallery Directory</title><link rel="stylesheet" href="styles.css"></head>
 <body>
-<header class="site-header"><div class="container header-content"><div><h1>Profile Directory</h1><p>Add, search, filter, and organize profiles.</p></div><button id="logoutButton" class="button secondary" type="button">Log Out</button></div></header>
-<main class="container">
-<section class="panel" aria-labelledby="formHeading">
-<h2 id="formHeading">Add Profile</h2>
-<form id="profileForm">
-<input type="hidden" id="editingId">
-<div class="form-grid">
-<div class="form-group"><label for="photo">Picture</label><input type="file" id="photo" accept="image/jpeg,image/png,image/webp"><p class="help-text">JPG, PNG, or WebP.</p></div>
-<div class="form-group"><label for="fullName">Full Name</label><input type="text" id="fullName" required autocomplete="name"></div>
+<header class="top-header"><div class="brand"><div class="brand-mark">RG</div><span>ROGUE GALLERY <strong>DIRECTORY</strong></span></div><button id="logoutButton" class="logout-button" type="button">Log Out</button></header>
+<div class="app-layout">
+<aside class="sidebar"><nav><button class="nav-item active" type="button">⌂ <span>Dashboard</span></button><h2 class="nav-heading">BROWSE GANGS</h2><div id="gangNavigation"></div></nav><div class="sidebar-footer">♛<br><span>Rogue Gallery Directory</span></div></aside>
+<main class="main-content">
+<section class="dashboard-header"><div><h1>Dashboard</h1><p>Manage and organize directory profiles.</p></div><button class="primary-button" id="showAddProfile" type="button">＋ Add Profile</button></section>
+<section class="panel" id="profileFormPanel"><div class="panel-heading"><h2 id="formTitle">Add Profile</h2><button id="closeFormButton" class="icon-button" type="button">×</button></div>
+<form id="profileForm"><input type="hidden" id="editingId"><div class="form-grid">
+<div class="form-group"><label for="photo">Picture</label><input type="file" id="photo" accept="image/jpeg,image/png,image/webp"><small>JPG, PNG, or WebP image.</small></div>
+<div class="form-group"><label for="fullName">Full Name</label><input type="text" id="fullName" required></div>
 <div class="form-group"><label for="dob">D.O.B</label><input type="date" id="dob" required></div>
 <div class="form-group"><label for="rank">Rank</label><select id="rank" required><option value="">Select a rank</option><option>Gang Leader</option><option>Sub Leader</option><option>Enforcer</option><option>Shooter</option><option>Soldier</option><option>Runner</option><option>Associate</option></select></div>
-<div class="form-group"><label for="group">Group</label><select id="group" required><option value="">Select a group</option><option>Sixx Gang</option><option>Unruly Gang</option><option>7Seven Gang</option><option>Alien Gang</option><option>1800 Gang</option><option>Muslim City/9 Gang</option><option>Rasta City Gang</option></select></div>
-</div>
-<div class="button-row"><button type="submit" class="button primary" id="saveButton">Add Profile</button><button type="button" class="button secondary" id="cancelEditButton" hidden>Cancel Edit</button></div>
-</form><div id="status" class="status" role="status" aria-live="polite"></div>
-</section>
-<section class="panel"><h2>Search and Filter</h2><div class="filter-grid"><div class="form-group"><label for="searchInput">Search by name</label><input type="search" id="searchInput" placeholder="Enter a name"></div><div class="form-group"><label for="filterGroup">Filter by group</label><select id="filterGroup"><option value="">All Groups</option><option>Sixx Gang</option><option>Unruly Gang</option><option>7Seven Gang</option><option>Alien Gang</option><option>1800 Gang</option><option>Muslim City/9 Gang</option><option>Rasta City Gang</option></select></div><div class="form-group"><label for="filterRank">Filter by rank</label><select id="filterRank"><option value="">All Ranks</option><option>Gang Leader</option><option>Sub Leader</option><option>Enforcer</option><option>Shooter</option><option>Soldier</option><option>Runner</option><option>Associate</option></select></div></div></section>
-<section class="panel"><h2>Backup and Restore</h2><p class="help-text">Export your profiles or restore a previous backup.</p><div class="button-row"><button type="button" id="exportButton" class="button primary">Export Backup</button><label for="importInput" class="button secondary import-label">Import Backup</label><input type="file" id="importInput" accept=".json,application/json" class="visually-hidden"></div><div id="backupStatus" class="status"></div></section>
-<section><h2>All Profiles</h2><div id="emptyMessage" class="empty-message">No profiles found.</div><div id="profiles" class="profiles-grid" aria-live="polite"></div></section>
-<section class="groups-section"><h2>Browse Groups</h2><div class="group-grid">
-<a href="group.html?group=Sixx%20Gang" class="group-card"><h3>Sixx Gang</h3><p>View profiles by rank.</p></a>
-<a href="group.html?group=Unruly%20Gang" class="group-card"><h3>Unruly Gang</h3><p>View profiles by rank.</p></a>
-<a href="group.html?group=7Seven%20Gang" class="group-card"><h3>7Seven Gang</h3><p>View profiles by rank.</p></a>
-<a href="group.html?group=Alien%20Gang" class="group-card"><h3>Alien Gang</h3><p>View profiles by rank.</p></a>
-<a href="group.html?group=1800%20Gang" class="group-card"><h3>1800 Gang</h3><p>View profiles by rank.</p></a>
-<a href="group.html?group=Muslim%20City%2F9%20Gang" class="group-card"><h3>Muslim City/9 Gang</h3><p>View profiles by rank.</p></a>
-<a href="group.html?group=Rasta%20City%20Gang" class="group-card"><h3>Rasta City Gang</h3><p>View profiles by rank.</p></a>
-</div></section>
-</main><script src="app.js"></script></body></html>
+<div class="form-group"><label for="gang">Gang</label><select id="gang" required><option value="">Select a gang</option><option>Sixx Gang</option><option>Unruly Gang</option><option>7Seven Gang</option><option>Alien Gang</option><option>1800 Gang</option><option>Muslim City/9 Gang</option><option>Rasta City Gang</option></select></div>
+</div><div class="form-actions"><button type="submit" class="primary-button" id="saveButton">Save Profile</button><button type="button" class="secondary-button" id="cancelEditButton">Cancel</button></div></form><div id="status" role="status"></div></section>
+<section class="filter-bar"><input type="search" id="searchInput" placeholder="Search profiles by name..."><select id="filterRank"><option value="">All Ranks</option><option>Gang Leader</option><option>Sub Leader</option><option>Enforcer</option><option>Shooter</option><option>Soldier</option><option>Runner</option><option>Associate</option></select><select id="sortSelect"><option value="rank">Sort by: Rank Hierarchy</option><option value="name">Sort by: Name</option><option value="newest">Sort by: Newest</option></select></section>
+<section><div id="emptyMessage" class="empty-message">No profiles have been added yet.</div><div id="profiles" class="profiles-grid"></div></section>
+<section class="backup-section"><h2>Backup & Restore</h2><p>Export your saved profiles or restore them from a backup file.</p><button id="exportButton" class="secondary-button" type="button">Export Backup</button><label class="secondary-button file-label" for="importInput">Import Backup</label><input id="importInput" type="file" accept=".json" hidden><div id="backupStatus"></div></section>
+</main></div><script src="app.js"></script></body></html>

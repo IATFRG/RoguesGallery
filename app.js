@@ -1,125 +1,26 @@
-// Profile Directory application
-const STORAGE_KEY = "profileDirectory";
-const LOGIN_KEY = "directoryLoggedIn";
+const STORAGE_KEY="rogueGalleryProfiles";
+const RANKS=["Gang Leader","Sub Leader","Enforcer","Shooter","Soldier","Runner","Associate"];
+const GANGS=["Sixx Gang","Unruly Gang","7Seven Gang","Alien Gang","1800 Gang","Muslim City/9 Gang","Rasta City Gang"];
+const getProfiles=()=>JSON.parse(localStorage.getItem(STORAGE_KEY)||"[]");
+const saveProfiles=p=>localStorage.setItem(STORAGE_KEY,JSON.stringify(p));
+const rankIndex=r=>{const i=RANKS.indexOf(r);return i<0?999:i};
+const esc=v=>{const d=document.createElement("div");d.textContent=v||"";return d.innerHTML};
+const date=v=>v?new Date(v+"T00:00:00").toLocaleDateString(undefined,{day:"2-digit",month:"short",year:"numeric"}):"";
 
-const DEMO_USERNAME = "IATF";
-const DEMO_PASSWORD = "IATF01";
-
-const roleHierarchy = {
-  "Gang Leader": 1,
-  "Sub Leader": 2,
-  "Enforcer": 3,
-  "Shooter": 4,
-  "Soldier": 5,
-  "Runner": 6,
-  "Associate": 7
-};
-
-function getProfiles() {
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; }
-  catch { return []; }
-}
-
-function saveProfiles(profiles) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(profiles));
-}
-
-const loginForm = document.getElementById("loginForm");
-if (loginForm) {
-  loginForm.addEventListener("submit", event => {
-    event.preventDefault();
-    const username = document.getElementById("username").value.trim();
-    const password = document.getElementById("password").value;
-    const status = document.getElementById("loginStatus");
-
-    if (username === DEMO_USERNAME && password === DEMO_PASSWORD) {
-      sessionStorage.setItem(LOGIN_KEY, "true");
-      location.href = "index.html";
-    } else {
-      status.textContent = "Incorrect username or password.";
-      status.className = "status error";
-    }
-  });
-}
-
-const logoutButton = document.getElementById("logoutButton");
-if (logoutButton) {
-  logoutButton.addEventListener("click", () => {
-    sessionStorage.removeItem(LOGIN_KEY);
-    location.href = "login.html";
-  });
-}
-
-function formatDate(value) {
-  if (!value) return "";
-  return new Date(value + "T00:00:00").toLocaleDateString(undefined, {
-    year: "numeric", month: "long", day: "numeric"
-  });
-}
-
-function renderProfiles(profiles) {
-  const container = document.getElementById("profiles");
-  const emptyMessage = document.getElementById("emptyMessage");
-  if (!container) return;
-
-  container.innerHTML = "";
-  if (emptyMessage) emptyMessage.hidden = profiles.length > 0;
-
-  profiles.forEach(profile => {
-    const card = document.createElement("article");
-    card.className = "profile-card";
-
-    const image = document.createElement("img");
-    image.className = "profile-image";
-    image.src = profile.image;
-    image.alt = `Profile photograph of ${profile.fullName}`;
-
-    const details = document.createElement("div");
-    details.className = "profile-details";
-
-    const heading = document.createElement("h3");
-    heading.textContent = profile.fullName;
-    details.appendChild(heading);
-
-    [["D.O.B", formatDate(profile.dob)], ["Rank", profile.rank], ["Group", profile.group]]
-      .forEach(([label, value]) => {
-        const line = document.createElement("p");
-        const strong = document.createElement("strong");
-        strong.textContent = `${label}: `;
-        line.append(strong, value);
-        details.appendChild(line);
-      });
-
-    card.append(image, details);
-    container.appendChild(card);
-  });
-}
-
-const groupTitle = document.getElementById("groupTitle");
-if (groupTitle) {
-  const selectedGroup = new URLSearchParams(location.search).get("group");
-  groupTitle.textContent = selectedGroup || "Group Profiles";
-  document.title = `${selectedGroup || "Group"} - Profile Directory`;
-
-  const renderGroupProfiles = () => {
-    const search = document.getElementById("groupSearch")?.value.toLowerCase() || "";
-    const rankFilter = document.getElementById("groupRankFilter")?.value || "";
-
-    const profiles = getProfiles()
-      .filter(profile =>
-        profile.group === selectedGroup &&
-        profile.fullName.toLowerCase().includes(search) &&
-        (!rankFilter || profile.rank === rankFilter)
-      )
-      .sort((a, b) =>
-        (roleHierarchy[a.rank] || 999) - (roleHierarchy[b.rank] || 999) ||
-        a.fullName.localeCompare(b.fullName)
-      );
-
-    renderProfiles(profiles);
-  };
-
-  document.getElementById("groupSearch")?.addEventListener("input", renderGroupProfiles);
-  document.getElementById("groupRankFilter")?.addEventListener("change", renderGroupProfiles);
-  renderGroupProfiles();
-}
+function nav(){const c=document.getElementById("gangNavigation");if(!c)return;const current=new URLSearchParams(location.search).get("gang");c.innerHTML=GANGS.map(g=>`<a class="nav-item gang-link ${current===g?"active":""}" href="group.html?gang=${encodeURIComponent(g)}">${esc(g)}</a>`).join("")}
+function card(p){const img=p.photo?`<img class="profile-image" src="${p.photo}" alt="Photo of ${esc(p.fullName)}">`:`<div class="profile-image"></div>`;return `<article class="profile-card"><div class="card-top">${img}<span class="rank-badge">${esc(p.rank)}</span></div><h3>${esc(p.fullName)}</h3><p>▣ D.O.B: ${esc(date(p.dob))}</p><p>♙ Rank: ${esc(p.rank)}</p><p>♛ Gang: ${esc(p.gang)}</p><div class="card-actions"><button class="primary-button edit-profile" data-id="${p.id}">✎ Edit</button><button class="danger-button delete-profile" data-id="${p.id}">🗑 Delete</button></div></article>`}
+function bind(){document.querySelectorAll(".edit-profile").forEach(b=>b.onclick=()=>edit(b.dataset.id));document.querySelectorAll(".delete-profile").forEach(b=>b.onclick=()=>remove(b.dataset.id))}
+function render(){const c=document.getElementById("profiles");if(!c)return;const search=document.getElementById("searchInput")?.value.toLowerCase()||"";const fr=document.getElementById("filterRank")?.value||"";const sort=document.getElementById("sortSelect")?.value||"rank";let p=getProfiles().filter(x=>x.fullName.toLowerCase().includes(search)&&(!fr||x.rank===fr));if(sort==="rank")p.sort((a,b)=>rankIndex(a.rank)-rankIndex(b.rank)||a.fullName.localeCompare(b.fullName));else if(sort==="name")p.sort((a,b)=>a.fullName.localeCompare(b.fullName));else p.sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));c.innerHTML=p.map(card).join("");const e=document.getElementById("emptyMessage");if(e)e.hidden=p.length>0;bind()}
+function edit(id){const p=getProfiles().find(x=>x.id===id);if(!p)return;const panel=document.getElementById("profileFormPanel");if(!panel){location.href="index.html";return}editingId.value=p.id;fullName.value=p.fullName;dob.value=p.dob;rank.value=p.rank;gang.value=p.gang;formTitle.textContent="Edit Profile";saveButton.textContent="Update Profile";panel.hidden=false;panel.scrollIntoView({behavior:"smooth"})}
+function remove(id){const p=getProfiles().find(x=>x.id===id);if(!p||!confirm(`Delete ${p.fullName}? This cannot be undone.`))return;saveProfiles(getProfiles().filter(x=>x.id!==id));render()}
+function reset(){const f=document.getElementById("profileForm");if(f)f.reset();if(window.editingId)editingId.value="";if(window.formTitle)formTitle.textContent="Add Profile";if(window.saveButton)saveButton.textContent="Save Profile"}
+function readFile(f){return new Promise((ok,no)=>{const r=new FileReader();r.onload=()=>ok(r.result);r.onerror=no;r.readAsDataURL(f)})}
+function dashboard(){const form=document.getElementById("profileForm");if(!form)return;showAddProfile.onclick=()=>{reset();profileFormPanel.hidden=false;profileFormPanel.scrollIntoView({behavior:"smooth"})};closeFormButton.onclick=()=>profileFormPanel.hidden=true;cancelEditButton.onclick=reset;
+form.onsubmit=async e=>{e.preventDefault();const id=editingId.value,all=getProfiles(),old=all.find(x=>x.id===id),file=photo.files[0];let picture=old?.photo||"";if(file)picture=await readFile(file);const p={id:id||String(Date.now()),fullName:fullName.value.trim(),dob:dob.value,rank:rank.value,gang:gang.value,photo:picture,createdAt:old?.createdAt||Date.now()};const i=all.findIndex(x=>x.id===p.id);if(i>=0)all[i]=p;else all.push(p);saveProfiles(all);status.textContent=i>=0?"Profile updated successfully.":"Profile added successfully.";status.className="success";reset();render()};
+["searchInput","filterRank","sortSelect"].forEach(id=>document.getElementById(id)?.addEventListener("input",render));filterRank?.addEventListener("change",render);sortSelect?.addEventListener("change",render);
+exportButton.onclick=()=>{const blob=new Blob([JSON.stringify(getProfiles(),null,2)],{type:"application/json"}),a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="rogue-gallery-backup.json";a.click()};
+importInput.onchange=async e=>{try{const data=JSON.parse(await e.target.files[0].text());if(!Array.isArray(data))throw 0;saveProfiles(data);backupStatus.textContent="Backup imported successfully.";backupStatus.className="success";render()}catch{backupStatus.textContent="Could not import this backup.";backupStatus.className="error"}};
+logoutButton.onclick=()=>location.href="login.html";render()}
+function groupPage(){const t=document.getElementById("gangTitle");if(!t)return;const g=new URLSearchParams(location.search).get("gang")||GANGS[0];t.textContent=g;const p=getProfiles().filter(x=>x.gang===g).sort((a,b)=>rankIndex(a.rank)-rankIndex(b.rank)||a.fullName.localeCompare(b.fullName));profiles.innerHTML=p.map(card).join("");emptyMessage.hidden=p.length>0;bind()}
+function login(){const f=document.getElementById("loginForm");if(!f)return;f.onsubmit=e=>{e.preventDefault();loginStatus.textContent="Signed in successfully.";loginStatus.className="success";setTimeout(()=>location.href="index.html",400)}}
+document.addEventListener("DOMContentLoaded",()=>{nav();login();dashboard();groupPage()});
