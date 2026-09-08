@@ -1,24 +1,39 @@
-ROGUE GALLERY DIRECTORY - FIREBASE FREE VERSION
+ROGUE GALLERY DIRECTORY - SECURE ADMIN CODE EDITION
 
-This version uses:
-- Firebase Authentication (Email/Password)
-- Cloud Firestore for cloud profiles
-- NO Firebase Storage
+WHAT THIS VERSION DOES
+- Every account has an Officer Name, email and password.
+- Regular Users can view all profiles, add profiles, and edit profiles they created.
+- Editors can edit only profiles assigned to them by an Administrator.
+- Administrators can manage roles, assign Editors, edit all profiles and delete profiles.
+- The FIRST Administrator can be created using an Administrator Setup Code.
 
-Profile pictures are resized/compressed in the browser and saved as small image data with the profile document.
+IMPORTANT SECURITY DESIGN
+The Administrator Setup Code is NOT stored in GitHub Pages or public JavaScript.
+It is stored as a Firebase Functions server secret.
+The secure backend checks the code and promotes only the FIRST Administrator.
+After the first Administrator exists, the code can no longer create another Administrator.
 
-SETUP:
-1. Firebase Console -> Authentication -> Sign-in method -> enable Email/Password.
-2. Firebase Console -> Firestore Database -> Rules.
-3. Replace the rules with the contents of firestore.rules and Publish.
-4. Upload ALL website files to your GitHub repository, including firebase-config.js.
-5. GitHub Pages should serve from the repository root.
+SETUP
+1. Enable Firebase Authentication > Email/Password.
+2. Create Firestore and publish firestore.rules.
+3. Install Firebase CLI and log in.
+4. From this project folder, initialize/deploy Functions if needed.
+5. Set the secret:
+   firebase functions:secrets:set ADMIN_SETUP_CODE
+6. Enter a strong administrator code when prompted. Do NOT put this code in GitHub.
+7. Deploy the backend:
+   firebase deploy --only functions
+8. Firebase will provide the function URL. Put that URL into admin-setup-config.js.
+9. Commit and publish the website files to GitHub Pages.
+10. Register the first account and enter the Administrator Setup Code.
+11. Leave the code blank for ordinary accounts.
 
-IMPORTANT LIMIT:
-Cloud Firestore documents have a maximum size. This website automatically resizes images to a maximum of 512 pixels and compresses them. Very large or unusually complex images may be rejected; choose a smaller image if that happens.
+IMPORTANT PRICING NOTE
+Secure Firebase Cloud Functions deployment may require the Blaze plan depending on Firebase's current account requirements. Check Firebase's current pricing before enabling billing.
 
-CLOUD ACCESS:
-Profiles are stored under the signed-in Firebase user's account. Sign in with the SAME email/password on another device to access the same profiles.
+FIRESTORE COLLECTIONS
+/users/{uid}
+/profiles/{profileId}
 
-OPTIONAL:
-Place logo.png in the same folder if you want your logo displayed on the login/register pages.
+PHOTO STORAGE
+No Firebase Storage is used. Profile photos are compressed and stored in Firestore, subject to Firestore document-size limits.
