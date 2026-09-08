@@ -1,4 +1,5 @@
 const STORAGE_KEY="profileDirectory",LOGIN_KEY="directoryLoggedIn";
+const DEMO_USERNAME="IATFBase"
 const DEMO_PASSWORD="8YearsAhead";
 const roleHierarchy={"Leader":1,"Sub Leader":2,"Enforcer":3,"Shooter":4,"Soldier":5,"Runner":6,"Associate":7};
 
