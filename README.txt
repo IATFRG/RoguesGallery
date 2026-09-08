@@ -1,27 +1,24 @@
-ROGUE GALLERY DIRECTORY - UPDATED VERSION
+ROGUE GALLERY DIRECTORY - FIREBASE FREE VERSION
 
-Included:
-- login.html
-- index.html
-- group.html
-- styles.css
-- app.js
+This version uses:
+- Firebase Authentication (Email/Password)
+- Cloud Firestore for cloud profiles
+- NO Firebase Storage
 
-Features:
-- Professional blue design
-- Rogue Gallery Directory branding
-- Left sidebar navigation
-- Browse Gangs
-- Log Out at top right
-- Add profiles and pictures
-- Edit profile cards
-- Delete profile cards
-- Rank hierarchy
-- Gang pages
-- Search and filtering
-- Backup and restore
+Profile pictures are resized/compressed in the browser and saved as small image data with the profile document.
 
-Optional:
-Upload your logo as logo.png into the same GitHub folder.
+SETUP:
+1. Firebase Console -> Authentication -> Sign-in method -> enable Email/Password.
+2. Firebase Console -> Firestore Database -> Rules.
+3. Replace the rules with the contents of firestore.rules and Publish.
+4. Upload ALL website files to your GitHub repository, including firebase-config.js.
+5. GitHub Pages should serve from the repository root.
 
-Profiles are stored in the browser using localStorage.
+IMPORTANT LIMIT:
+Cloud Firestore documents have a maximum size. This website automatically resizes images to a maximum of 512 pixels and compresses them. Very large or unusually complex images may be rejected; choose a smaller image if that happens.
+
+CLOUD ACCESS:
+Profiles are stored under the signed-in Firebase user's account. Sign in with the SAME email/password on another device to access the same profiles.
+
+OPTIONAL:
+Place logo.png in the same folder if you want your logo displayed on the login/register pages.
