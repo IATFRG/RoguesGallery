@@ -2,8 +2,8 @@
 const STORAGE_KEY = "profileDirectory";
 const LOGIN_KEY = "directoryLoggedIn";
 
-const DEMO_USERNAME = "IATFBase";
-const DEMO_PASSWORD = "8YearsAhead";
+const DEMO_USERNAME = "IATF";
+const DEMO_PASSWORD = "IATF01";
 
 const roleHierarchy = {
   "Gang Leader": 1,
