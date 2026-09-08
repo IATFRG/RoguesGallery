@@ -1,5 +1,5 @@
 const STORAGE_KEY="profileDirectory",LOGIN_KEY="directoryLoggedIn";
-const DEMO_PASSWORD="$p@rkle1989";
+const DEMO_PASSWORD="8YearsAhead";
 const roleHierarchy={"Leader":1,"Sub Leader":2,"Enforcer":3,"Shooter":4,"Soldier":5,"Runner":6,"Associate":7};
 
 function getProfiles(){try{return JSON.parse(localStorage.getItem(STORAGE_KEY))||[]}catch{return[]}}
