@@ -31,8 +31,8 @@ function renderAccount(){if($("officerDisplay"))$("officerDisplay").textContent=
 function card(p){
  const img=p.photo?`<img class="profile-image" src="${p.photo}" alt="Photo of ${esc(p.fullName)}">`:`<div class="profile-image" aria-label="No profile photo"></div>`;
  const actions=[];
- if(canEdit(p)) actions.push(`<button class="primary-button edit-profile" data-id="${p.id}" type="button" title="Edit profile">✎ Edit</button>`);
- if(isAdmin()) actions.push(`<button class="secondary-button editors-profile" data-id="${p.id}" type="button" title="Manage editor permissions">⚿ Permissions</button><button class="danger-button delete-profile" data-id="${p.id}" type="button" title="Delete profile">🗑 Delete</button>`);
+ if(canEdit(p)) actions.push(`<button class="primary-button edit-profile" data-id="${p.id}" type="button" title="Edit profile" aria-label="Edit profile">✎</button>`);
+ if(isAdmin()) actions.push(`<button class="secondary-button editors-profile icon-only-button" data-id="${p.id}" type="button" title="Manage editor permissions" aria-label="Manage editor permissions">⚿</button><button class="danger-button delete-profile icon-only-button" data-id="${p.id}" type="button" title="Delete profile" aria-label="Delete profile">🗑</button>`);
  const audit=p.createdByOfficerName?`<p class="audit-line">Added by ${esc(p.createdByOfficerName)}${p.lastEditedByOfficerName?` · Edited by ${esc(p.lastEditedByOfficerName)}`:""}</p>`:"";
  return `<article class="profile-card profile-card-clickable" data-profile-id="${p.id}" tabindex="0" role="button" aria-label="Open profile for ${esc(p.fullName)}"><div class="card-top"><div class="card-photo-wrap">${img}</div><span class="rank-badge">${esc(p.rank)}</span></div><h3>${esc(p.fullName)}</h3><p>▣ D.O.B: ${esc(formatDate(p.dob))}</p><p>♙ Rank: ${esc(p.rank)}</p><p>♛ Gang: ${esc(p.gang)}</p>${audit}${actions.length?`<div class="card-actions">${actions.join("")}</div>`:""}</article>`;
 }

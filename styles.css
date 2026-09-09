@@ -122,3 +122,15 @@ input,select{min-height:46px;border:1px solid var(--border);border-radius:8px;pa
 .detail-actions .danger-button{margin-left:auto}
 button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid rgba(87,199,255,.42);outline-offset:2px}
 @media(max-width:650px){.card-actions{gap:7px}.card-actions button{min-height:44px}.detail-actions{display:grid;grid-template-columns:1fr 1fr}.detail-actions button{width:100%}.detail-actions .danger-button{margin-left:0;grid-column:1/-1}.detail-actions #detailSaveButton{grid-column:1/-1}}
+
+/* Compact icon-only admin actions on profile cards */
+.card-actions .icon-only-button{width:48px;min-width:48px;padding:0 10px;line-height:1;font-size:18px;}
+.card-actions .icon-only-button:hover{transform:translateY(-1px);}
+@media(max-width:650px){.card-actions .icon-only-button{width:46px;min-width:46px;}}
+
+/* Keep all profile-card actions compact and icon-only on mobile */
+@media(max-width:650px){
+  .card-actions{flex-direction:row!important;align-items:center;}
+  .card-actions .edit-profile{flex:1!important;width:auto!important;}
+  .card-actions .icon-only-button{flex:0 0 46px!important;width:46px!important;min-width:46px!important;}
+}
