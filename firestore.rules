@@ -12,6 +12,25 @@ service cloud.firestore {
         (signedIn() && request.auth.uid in profile.data.editorIds);
     }
 
+    function validCautions(cautions) {
+      return cautions is list && cautions.hasOnly([
+        'Firearm Offender', 'Drug Offender', 'Violent', 'Breaker',
+        'Sexual Offender', 'Murderer'
+      ]);
+    }
+
+    function canEditCautionsAndNotes() {
+      return hasAccount() &&
+        request.resource.data.cautions is list &&
+        validCautions(request.resource.data.cautions) &&
+        request.resource.data.notes is string &&
+        request.resource.data.notes.size() <= 255 &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'cautions', 'notes', 'lastEditedByUid', 'lastEditedByOfficerName', 'lastEditedAt'
+        ]) &&
+        request.resource.data.lastEditedByUid == request.auth.uid;
+    }
+
     match /users/{userId} {
       allow get: if isOwner(userId) || isAdmin();
       allow list: if isAdmin();
@@ -42,15 +61,20 @@ service cloud.firestore {
       allow create: if signedIn() &&
         request.resource.data.createdByUid == request.auth.uid &&
         request.resource.data.editorIds is list &&
+        request.resource.data.address is string &&
+        request.resource.data.address.size() <= 255 &&
         request.resource.data.lastEditedByUid == request.auth.uid;
 
-      allow update: if canEditProfile(resource) &&
-        (
-          isAdmin() || (
-            request.resource.data.createdByUid == resource.data.createdByUid &&
-            request.resource.data.editorIds == resource.data.editorIds
-          )
-        ) && request.resource.data.lastEditedByUid == request.auth.uid;
+      allow update: if (
+        canEditCautionsAndNotes() ||
+        (canEditProfile(resource) &&
+          (
+            isAdmin() || (
+              request.resource.data.createdByUid == resource.data.createdByUid &&
+              request.resource.data.editorIds == resource.data.editorIds
+            )
+          ) && request.resource.data.lastEditedByUid == request.auth.uid)
+      );
 
       allow delete: if isAdmin();
     }

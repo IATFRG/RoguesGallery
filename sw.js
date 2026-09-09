@@ -1,4 +1,4 @@
-const CACHE_NAME = 'rogue-gallery-shell-v2';
+const CACHE_NAME = 'rogue-gallery-shell-v3';
 const APP_SHELL = [
   './', './index.html', './login.html', './register.html', './group.html',
   './styles.css', './app.js', './firebase-config.js', './manifest.webmanifest',

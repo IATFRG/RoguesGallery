@@ -52,3 +52,5 @@ website. No Firebase Storage is required.
 
 For a store-distributed Android/iOS build, this web app can later be wrapped
 with Capacitor without changing the Firebase data model.
+
+Browse Gangs is a collapsible navigation category. Tap/click it to expand or collapse the seven gang links.
