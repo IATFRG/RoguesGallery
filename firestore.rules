@@ -2,37 +2,69 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() { return request.auth != null; }
-    function isAdmin() {
-      return signedIn() &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    function ownUser() { return get(/databases/$(database)/documents/users/$(request.auth.uid)); }
+    function hasAccount() { return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)); }
+    function role() { return hasAccount() ? ownUser().data.role : 'user'; }
+    function isAdmin() { return role() == 'admin'; }
+    function isOwner(uid) { return signedIn() && request.auth.uid == uid; }
+    function canEditProfile(profile) {
+      return isAdmin() || isOwner(profile.data.createdByUid) ||
+        (signedIn() && request.auth.uid in profile.data.editorIds);
     }
 
     match /users/{userId} {
-      allow create: if signedIn() && request.auth.uid == userId
-        && request.resource.data.role == 'user';
-      allow read: if signedIn() && (request.auth.uid == userId || isAdmin());
-      allow update: if isAdmin() || (
-        signedIn() && request.auth.uid == userId
-        && request.resource.data.role == resource.data.role
-        && request.resource.data.email == resource.data.email
+      allow get: if isOwner(userId) || isAdmin();
+      allow list: if isAdmin();
+
+      allow create: if isOwner(userId) && (
+        request.resource.data.role == 'user' ||
+        (
+          request.resource.data.role == 'admin' &&
+          request.resource.data.adminSetupCode is string &&
+          exists(/databases/$(database)/documents/system/bootstrap) &&
+          get(/databases/$(database)/documents/system/bootstrap).data.enabled == true &&
+          request.resource.data.adminSetupCode == get(/databases/$(database)/documents/system/bootstrap).data.code
+        )
       );
+
+      allow update: if isAdmin() || (
+        isOwner(userId) &&
+        request.resource.data.role == resource.data.role &&
+        request.resource.data.officerName == resource.data.officerName &&
+        request.resource.data.email == resource.data.email
+      );
+
       allow delete: if isAdmin();
     }
 
     match /profiles/{profileId} {
       allow read: if signedIn();
-      allow create: if signedIn()
-        && request.resource.data.createdBy == request.auth.uid;
-      allow update: if isAdmin() || (
-        signedIn()
-        && request.resource.data.createdBy == resource.data.createdBy
-        && request.resource.data.authorizedEditorIds == resource.data.authorizedEditorIds
-        && (
-          resource.data.createdBy == request.auth.uid ||
-          request.auth.uid in resource.data.authorizedEditorIds
-        )
-      );
+      allow create: if signedIn() &&
+        request.resource.data.createdByUid == request.auth.uid &&
+        request.resource.data.editorIds is list &&
+        request.resource.data.lastEditedByUid == request.auth.uid;
+
+      allow update: if canEditProfile(resource) &&
+        (
+          isAdmin() || (
+            request.resource.data.createdByUid == resource.data.createdByUid &&
+            request.resource.data.editorIds == resource.data.editorIds
+          )
+        ) && request.resource.data.lastEditedByUid == request.auth.uid;
+
       allow delete: if isAdmin();
+    }
+
+    // One-time first administrator bootstrap. The web app cannot read this document.
+    match /system/bootstrap {
+      allow get, list: if false;
+      allow create: if false;
+      allow update: if signedIn() &&
+        resource.data.enabled == true &&
+        request.resource.data.enabled == false &&
+        request.resource.data.code == resource.data.code &&
+        getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+      allow delete: if false;
     }
   }
 }

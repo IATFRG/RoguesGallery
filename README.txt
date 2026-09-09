@@ -1,39 +1,41 @@
-ROGUE GALLERY DIRECTORY - SECURE ADMIN CODE EDITION
+ROGUE GALLERY DIRECTORY — ROLES & OFFICER NAME VERSION
 
-WHAT THIS VERSION DOES
-- Every account has an Officer Name, email and password.
-- Regular Users can view all profiles, add profiles, and edit profiles they created.
-- Editors can edit only profiles assigned to them by an Administrator.
-- Administrators can manage roles, assign Editors, edit all profiles and delete profiles.
-- The FIRST Administrator can be created using an Administrator Setup Code.
+This version uses Firebase Authentication + Cloud Firestore only. Firebase Storage is not required.
 
-IMPORTANT SECURITY DESIGN
-The Administrator Setup Code is NOT stored in GitHub Pages or public JavaScript.
-It is stored as a Firebase Functions server secret.
-The secure backend checks the code and promotes only the FIRST Administrator.
-After the first Administrator exists, the code can no longer create another Administrator.
+IMPORTANT: FIRST ADMINISTRATOR SETUP
 
-SETUP
-1. Enable Firebase Authentication > Email/Password.
-2. Create Firestore and publish firestore.rules.
-3. Install Firebase CLI and log in.
-4. From this project folder, initialize/deploy Functions if needed.
-5. Set the secret:
-   firebase functions:secrets:set ADMIN_SETUP_CODE
-6. Enter a strong administrator code when prompted. Do NOT put this code in GitHub.
-7. Deploy the backend:
-   firebase deploy --only functions
-8. Firebase will provide the function URL. Put that URL into admin-setup-config.js.
-9. Commit and publish the website files to GitHub Pages.
-10. Register the first account and enter the Administrator Setup Code.
-11. Leave the code blank for ordinary accounts.
+The secret administrator setup code is NOT placed in the GitHub source code.
+Instead, create it once inside Firestore:
 
-IMPORTANT PRICING NOTE
-Secure Firebase Cloud Functions deployment may require the Blaze plan depending on Firebase's current account requirements. Check Firebase's current pricing before enabling billing.
+1. Firebase Console → Firestore Database → Data.
+2. Create collection: system
+3. Create document ID: bootstrap
+4. Add field: code (string) = choose a long secret code yourself.
+5. Add field: enabled (boolean) = true.
+6. Publish the included firestore.rules BEFORE registering the first administrator.
 
-FIRESTORE COLLECTIONS
-/users/{uid}
-/profiles/{profileId}
+Then register the first account using:
+- Officer Name
+- Email
+- Password
+- The same secret administrator setup code
 
-PHOTO STORAGE
-No Firebase Storage is used. Profile photos are compressed and stored in Firestore, subject to Firestore document-size limits.
+The registration uses an atomic Firestore batch to create the account as Administrator and set enabled to false. The web app cannot read the bootstrap document because the rules deny access.
+
+DO NOT put the setup code inside app.js, HTML, GitHub, or any public file.
+
+PERMISSIONS
+- User: View all profiles, add profiles, edit only profiles they created.
+- Editor: View all profiles, add profiles, edit profiles specifically assigned by an Administrator, plus profiles they created.
+- Administrator: View/add/edit/delete all profiles, manage account roles, assign Editors to individual profiles.
+
+AFTER FIRST ADMIN IS CREATED
+- Sign in as the Administrator.
+- Use Manage Users to promote selected accounts to Editor.
+- On a profile card, use Permissions to choose which Editors can edit that profile.
+
+FIRESTORE RULES
+Copy the contents of firestore.rules into Firebase → Firestore Database → Rules and publish them.
+
+IMPORTANT SECURITY NOTE
+Firebase web configuration values identify the web app; authorization is enforced by Firebase Authentication and Firestore Security Rules. Keep the administrator setup code private.
