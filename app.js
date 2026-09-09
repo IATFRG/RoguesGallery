@@ -85,27 +85,81 @@ function setupRegister(){const f=$("registerForm");if(!f)return;f.onsubmit=async
 let deferredInstallPrompt=null;
 function setupPWA(){
   if("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(()=>{});
+
+  const header=$("installButton"), navButton=$("installNavButton");
+  const isStandalone = window.matchMedia?.("(display-mode: standalone)").matches || window.navigator.standalone === true;
+  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  const isAndroid = /android/i.test(navigator.userAgent);
+
   const setInstallVisible=visible=>{
-    const header=$("installButton"), navButton=$("installNavButton");
     if(header) header.hidden=!visible;
     if(navButton) navButton.hidden=!visible;
   };
+
+  const showInstallHelp=()=>{
+    let box=$("installHelpModal");
+    if(!box){
+      box=document.createElement("div");
+      box.id="installHelpModal";
+      box.className="install-help-modal";
+      box.innerHTML=`<div class="install-help-card" role="dialog" aria-modal="true" aria-labelledby="installHelpTitle">
+        <button type="button" class="install-help-close" aria-label="Close">×</button>
+        <div class="install-help-icon">📱</div>
+        <h2 id="installHelpTitle">Install Rogue Gallery</h2>
+        <p id="installHelpText"></p>
+        <ol id="installHelpSteps"></ol>
+        <button type="button" class="primary-button install-help-done">Got it</button>
+      </div>`;
+      document.body.appendChild(box);
+      box.querySelector(".install-help-close").onclick=()=>box.remove();
+      box.querySelector(".install-help-done").onclick=()=>box.remove();
+      box.addEventListener("click",e=>{if(e.target===box)box.remove()});
+    }
+    const text=box.querySelector("#installHelpText"), steps=box.querySelector("#installHelpSteps");
+    if(isIOS){
+      text.textContent="On iPhone or iPad, Safari does not provide the automatic install prompt. Add Rogue Gallery to your Home Screen manually.";
+      steps.innerHTML="<li>Open this site in <strong>Safari</strong>.</li><li>Tap the <strong>Share</strong> button.</li><li>Choose <strong>Add to Home Screen</strong>.</li><li>Tap <strong>Add</strong>.</li>";
+    }else if(isAndroid){
+      text.textContent="Your browser has not offered the automatic install prompt yet. You can install Rogue Gallery from the browser menu.";
+      steps.innerHTML="<li>Open the browser menu <strong>⋮</strong>.</li><li>Choose <strong>Install app</strong> or <strong>Add to Home screen</strong>.</li><li>Confirm the installation.</li>";
+    }else{
+      text.textContent="Your browser has not offered the automatic install prompt. Use your browser's menu to add this site to your home screen or install it as an app.";
+      steps.innerHTML="<li>Open your browser menu.</li><li>Look for <strong>Install app</strong>, <strong>Add to Home screen</strong>, or similar.</li><li>Confirm the installation.</li>";
+    }
+    box.hidden=false;
+  };
+
+  const install=async()=>{
+    if(isStandalone){return;}
+    if(deferredInstallPrompt){
+      try{
+        deferredInstallPrompt.prompt();
+        await deferredInstallPrompt.userChoice;
+      }catch(_){
+        showInstallHelp();
+      }
+      deferredInstallPrompt=null;
+      setInstallVisible(false);
+      return;
+    }
+    showInstallHelp();
+  };
+
+  if(isStandalone){setInstallVisible(false);return;}
+  // Keep the menu option available so it remains useful on iOS and browsers
+  // that do not expose beforeinstallprompt.
+  setInstallVisible(true);
   window.addEventListener("beforeinstallprompt",e=>{
     e.preventDefault();
     deferredInstallPrompt=e;
     setInstallVisible(true);
   });
-  const install=async()=>{
-    if(!deferredInstallPrompt)return;
-    deferredInstallPrompt.prompt();
-    await deferredInstallPrompt.userChoice;
-    deferredInstallPrompt=null;
-    setInstallVisible(false);
-  };
-  const header=$("installButton"), navButton=$("installNavButton");
   if(header) header.onclick=install;
   if(navButton) navButton.onclick=install;
-  window.addEventListener("appinstalled",()=>setInstallVisible(false));
+  window.addEventListener("appinstalled",()=>{
+    deferredInstallPrompt=null;
+    setInstallVisible(false);
+  });
 }
 
 async function boot(){setupPWA();nav();setupLogin();setupRegister();setupLogout();setupDashboard();onAuthStateChanged(auth,async user=>{const page=location.pathname.split("/").pop()||"index.html";const privatePages=["index.html","group.html",""];if(user){currentUser=user;if(page==="login.html"||page==="register.html"){location.replace("index.html");return;}try{await loadAccount();await loadProfiles();if(isAdmin()&&$("showUsersButton"))$("showUsersButton").hidden=false;renderDashboard();renderGroup()}catch(e){const msg=$("status")||$("backupStatus")||$("registerStatus");if(msg){msg.textContent="Could not load directory account: "+e.message;msg.className="error"}}}else if(privatePages.includes(page)){location.href="login.html"}})}

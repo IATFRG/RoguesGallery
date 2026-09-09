@@ -72,3 +72,15 @@ input,select{min-height:46px;border:1px solid var(--border);border-radius:8px;pa
 @media (display-mode: standalone){.top-header{padding-top:max(10px,env(safe-area-inset-top));}.sidebar{top:calc(64px + env(safe-area-inset-top))}}
 
 .app-install-nav{border:1px solid rgba(87,199,255,.25)!important}
+
+
+.install-help-modal{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;padding:18px;background:rgba(3,14,31,.72);backdrop-filter:blur(4px)}
+.install-help-modal[hidden]{display:none}
+.install-help-card{position:relative;width:min(430px,100%);max-height:90vh;overflow:auto;background:#fff;border-radius:18px;padding:28px 24px;box-shadow:0 24px 70px rgba(0,0,0,.3);color:#10233f}
+.install-help-card h2{margin:8px 0 10px;font-size:1.45rem}
+.install-help-card p{line-height:1.55;margin:0 0 16px;color:#43546d}
+.install-help-card ol{margin:0 0 22px;padding-left:22px;line-height:1.7}
+.install-help-icon{font-size:2rem}
+.install-help-close{position:absolute;right:12px;top:10px;border:0;background:transparent;font-size:2rem;line-height:1;cursor:pointer;color:#53657d}
+.install-help-done{width:100%;min-height:46px}
+@media(max-width:600px){.install-help-card{padding:24px 20px;border-radius:16px}.install-help-modal{padding:12px}}
