@@ -1,8 +1,8 @@
-const CACHE_NAME = 'rogue-gallery-shell-v3';
+const CACHE_NAME = 'rogue-gallery-shell-v4';
 const APP_SHELL = [
   './', './index.html', './login.html', './register.html', './group.html',
   './styles.css', './app.js', './firebase-config.js', './manifest.webmanifest',
-  './icons/icon-192.png', './icons/icon-512.png'
+  './icons/icon-192.png', './icons/icon-512.png', './icons/header-logo.png'
 ];
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(APP_SHELL)).then(() => self.skipWaiting()));
