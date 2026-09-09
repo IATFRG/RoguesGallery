@@ -86,8 +86,27 @@ async function saveProfileDetails(id){
    if(status){status.textContent="Profile updated successfully.";status.className="success";}
  }catch(e){if(status){status.textContent=e.message||"Could not save profile.";status.className="error";}}
 }
+function openProfilePhoto(p){
+ if(!p?.photo)return;
+ let modal=$("profilePhotoModal");
+ if(!modal){
+   modal=document.createElement("div");
+   modal.id="profilePhotoModal";
+   modal.className="profile-photo-modal";
+   modal.innerHTML=`<div class="profile-photo-backdrop" data-close-photo></div><div class="profile-photo-dialog" role="dialog" aria-modal="true" aria-label="Enlarged profile photo"><button type="button" class="profile-photo-close" aria-label="Close enlarged photo" data-close-photo>×</button><img id="profilePhotoLarge" class="profile-photo-large" alt=""><div id="profilePhotoWatermark" class="profile-photo-watermark"></div></div>`;
+   document.body.appendChild(modal);
+   modal.querySelectorAll("[data-close-photo]").forEach(el=>el.addEventListener("click",closeProfilePhoto));
+ }
+ const image=$("profilePhotoLarge"),watermark=$("profilePhotoWatermark");
+ image.src=p.photo;image.alt=`Photo of ${p.fullName||"profile"}`;
+ watermark.textContent=p.fullName||"";
+ modal.hidden=false;document.body.classList.add("photo-modal-open");
+ document.addEventListener("keydown",handlePhotoModalKey);
+}
+function closeProfilePhoto(){const modal=$("profilePhotoModal");if(!modal)return;modal.hidden=true;document.body.classList.remove("photo-modal-open");document.removeEventListener("keydown",handlePhotoModalKey);}
+function handlePhotoModalKey(e){if(e.key==="Escape")closeProfilePhoto();}
 function renderProfileDetail(p,editing=false){
- const photo=$("detailPhoto");if(photo){if(p.photo){photo.src=p.photo;photo.hidden=false}else{photo.removeAttribute("src");photo.hidden=true;}}
+ const photo=$("detailPhoto");if(photo){if(p.photo){photo.src=p.photo;photo.hidden=false;photo.onclick=()=>openProfilePhoto(p);photo.setAttribute("role","button");photo.setAttribute("tabindex","0");photo.setAttribute("aria-label",`Enlarge photo of ${p.fullName||"profile"}`);photo.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();openProfilePhoto(p);}};}else{photo.removeAttribute("src");photo.hidden=true;photo.onclick=null;photo.removeAttribute("role");photo.removeAttribute("tabindex");}}
  if($("detailName"))$("detailName").textContent=p.fullName||"";
  if($("detailRank"))$("detailRank").textContent=p.rank||"";
  if($("detailDob"))$("detailDob").textContent=`D.O.B: ${formatDate(p.dob)}`;if($("detailAddress"))$("detailAddress").textContent=p.address?`Address: ${p.address}`:"Address: Not provided";
