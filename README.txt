@@ -39,3 +39,16 @@ Copy the contents of firestore.rules into Firebase → Firestore Database → Ru
 
 IMPORTANT SECURITY NOTE
 Firebase web configuration values identify the web app; authorization is enforced by Firebase Authentication and Firestore Security Rules. Keep the administrator setup code private.
+
+MOBILE / PWA
+------------
+This version is mobile-ready and installable as a Progressive Web App (PWA).
+On a supported phone browser, open the GitHub Pages site and use the browser's
+Install/Add to Home Screen option. On supported browsers the dashboard header
+also exposes an Install App button.
+
+The app uses the same Firebase Authentication and Firestore backend as the
+website. No Firebase Storage is required.
+
+For a store-distributed Android/iOS build, this web app can later be wrapped
+with Capacitor without changing the Firebase data model.

@@ -27,3 +27,48 @@ input,select{min-height:46px;border:1px solid var(--border);border-radius:8px;pa
 @media(max-width:850px){.sidebar{width:220px}.main-content{padding:20px}.filter-bar{grid-template-columns:1fr}.top-header{padding:0 20px}.brand{font-size:17px}}
 @media(max-width:650px){.app-layout{display:block}.sidebar{width:100%;padding:15px}.sidebar-footer{display:none}.dashboard-header{flex-direction:column;align-items:flex-start}.top-header{height:auto;padding:14px}.brand{font-size:14px}.main-content{padding:15px}.profiles-grid{grid-template-columns:1fr}.file-label{margin:8px 0 0}.form-actions{flex-direction:column}}
 .header-account{display:flex;align-items:center;gap:16px}.header-account>div{display:flex;flex-direction:column;align-items:flex-end;gap:3px}.header-account small{color:#c5d9f3;font-size:11px;letter-spacing:1px}.panel-copy{color:var(--muted);margin:5px 0 0}.users-list,.editor-list{display:grid;gap:10px;margin-top:18px}.user-row,.editor-row{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 16px;border:1px solid var(--border);border-radius:10px;background:#f8fbff}.user-row small,.editor-row small{display:block;color:var(--muted);margin-top:4px}.editor-row{justify-content:flex-start;cursor:pointer}.editor-row input{min-height:auto;width:18px;height:18px}.editor-row span{display:flex;flex-direction:column}.audit-line{margin-top:10px!important;padding-top:10px;border-top:1px solid var(--border);font-size:12px!important;color:#6b7a90!important}.admin-setup{margin:18px 0;padding:14px;border:1px dashed #9eb8d6;border-radius:10px;background:#f7fbff}.admin-setup summary{font-weight:800;color:#0b2a52;cursor:pointer}.admin-setup p{font-size:13px;color:var(--muted);margin:10px 0}.role-select{min-width:150px}@media(max-width:650px){.header-account{gap:10px}.header-account>div{display:none}.user-row{align-items:flex-start;flex-direction:column}.role-select{width:100%}}
+
+/* Mobile/PWA enhancements */
+.install-button{background:rgba(87,199,255,.14);color:#fff;border:1px solid rgba(87,199,255,.65);border-radius:8px;padding:11px 14px;text-decoration:none;cursor:pointer;font-weight:800}
+.header-account{flex-wrap:wrap}
+@media (max-width:850px){
+  .top-header{gap:12px;align-items:center}
+  .header-account{margin-left:auto}
+  .sidebar{overflow-x:auto;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch}
+  .sidebar nav{display:flex;align-items:center;gap:8px;min-width:max-content}
+  .sidebar .nav-heading{margin:0 8px;font-size:11px;white-space:nowrap}
+  .sidebar .nav-item{width:auto;margin:0;padding:12px 14px;min-height:44px;white-space:nowrap}
+  .sidebar .gang-link:before{margin-right:7px}
+}
+@media (max-width:650px){
+  body{font-size:15px;padding-bottom:env(safe-area-inset-bottom)}
+  .top-header{position:sticky;top:0;z-index:20;padding:10px 12px;min-height:64px;box-shadow:0 4px 16px rgba(7,29,58,.2)}
+  .brand{gap:8px;font-size:12px;letter-spacing:1px;line-height:1.2}
+  .brand-mark{font-size:12px;padding:6px;border-radius:7px}
+  .header-account{gap:6px}
+  .install-button,.logout-button{min-height:44px;padding:9px 11px;font-size:12px}
+  .sidebar{padding:9px 10px;position:sticky;top:64px;z-index:15;box-shadow:0 3px 12px rgba(7,29,58,.12)}
+  .main-content{padding:12px 12px 30px}
+  .dashboard-header{padding:18px;border-radius:12px;margin-bottom:12px}
+  .dashboard-header h1{font-size:25px}
+  .dashboard-header .primary-button{width:100%;min-height:48px}
+  .panel,.backup-section{padding:17px;border-radius:12px}
+  .form-grid{grid-template-columns:1fr;gap:14px}
+  .form-actions{gap:9px}
+  .form-actions button,.primary-button,.secondary-button,.danger-button{min-height:46px}
+  .filter-bar{gap:10px;margin:12px 0 16px}
+  .profiles-grid{gap:12px}
+  .profile-card{padding:14px;border-radius:12px}
+  .profile-image{width:96px;height:96px}
+  .card-actions{flex-direction:column}
+  .card-actions button{width:100%}
+  .user-row,.editor-row{padding:13px}
+  .login-page{padding:14px}
+  .login-panel{padding:24px 18px;border-radius:16px}
+  .login-image{width:190px;height:145px}
+  input,select{min-height:48px;font-size:16px}
+  .file-label{width:100%;margin:8px 0 0}
+}
+@media (display-mode: standalone){.top-header{padding-top:max(10px,env(safe-area-inset-top));}.sidebar{top:calc(64px + env(safe-area-inset-top))}}
+
+.app-install-nav{border:1px solid rgba(87,199,255,.25)!important}
