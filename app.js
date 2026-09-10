@@ -1328,10 +1328,12 @@ function setupRegister() {
     const status =
       $("registerStatus");
 
-    const officerName =
-      $("officerName")
-        .value
-        .trim();
+    const officerNameInput = $("officerName");
+
+console.log("OFFICER NAME INPUT:", officerNameInput);
+console.log("OFFICER NAME VALUE:", officerNameInput?.value);
+
+const officerName = officerNameInput?.value.trim() || "";
 
     const email =
       $("email")
