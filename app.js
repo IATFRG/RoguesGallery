@@ -1,7 +1,11 @@
 import { auth, db } from "./firebase-config.js";
 import {
-  onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword,
-  signOut, deleteUser
+  onAuthStateChanged,
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  signOut,
+  deleteUser,
+  updateProfile
 } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
 import {
   collection, doc, getDocs, getDoc, setDoc, updateDoc, deleteDoc,
@@ -52,10 +56,22 @@ async function loadAccount(){
   const userRef = doc(db, "users", currentUser.uid);
   const snap = await getDoc(userRef);
 
+  /*
+   * Firebase Authentication is the source of truth for the user's
+   * identity. Firestore users/{UID} stores the directory account,
+   * Officer Name and role.
+   *
+   * If the Firestore document is missing, recreate it automatically.
+   * IMPORTANT: A missing Firestore document is always recreated as
+   * "user". Existing roles are NEVER changed by this function.
+   */
+
   if (!snap.exists()) {
-    // Automatically create a Firestore directory account
-    // for an existing Firebase Authentication user.
-    const officerName = currentUser.displayName || currentUser.email || "Unnamed Officer";
+    const officerName =
+      currentUser.displayName ||
+      currentUser.email ||
+      "Unnamed Officer";
+
     const email = currentUser.email || "";
 
     await setDoc(userRef, {
@@ -70,31 +86,71 @@ async function loadAccount(){
       email,
       role: "user"
     };
+
   } else {
+
+    /*
+     * Existing Firestore account found.
+     * Keep its existing role exactly as it is.
+     */
     currentAccount = snap.data();
+
+    /*
+     * If Officer Name is missing or blank, try to restore it from
+     * Firebase Authentication without changing the user's role.
+     */
+    const existingOfficerName =
+      typeof currentAccount.officerName === "string"
+        ? currentAccount.officerName.trim()
+        : "";
+
+    const authOfficerName =
+      typeof currentUser.displayName === "string"
+        ? currentUser.displayName.trim()
+        : "";
+
+    const repairedOfficerName =
+      existingOfficerName ||
+      authOfficerName ||
+      currentUser.email ||
+      "Unnamed Officer";
+
+    const existingEmail =
+      typeof currentAccount.email === "string"
+        ? currentAccount.email.trim()
+        : "";
+
+    const repairedEmail =
+      existingEmail ||
+      currentUser.email ||
+      "";
+
+    /*
+     * Only repair missing Officer Name/email.
+     * NEVER overwrite the existing role.
+     */
+    if (
+      repairedOfficerName !== existingOfficerName ||
+      repairedEmail !== existingEmail
+    ) {
+      await setDoc(
+        userRef,
+        {
+          officerName: repairedOfficerName,
+          email: repairedEmail
+        },
+        { merge: true }
+      );
+
+      currentAccount = {
+        ...currentAccount,
+        officerName: repairedOfficerName,
+        email: repairedEmail
+      };
+    }
   }
 
   renderAccount();
-}
-```
-
-async function loadProfiles(){const snap=await getDocs(profileCollection());profiles=snap.docs.map(d=>({id:d.id,...d.data()}));}
-async function loadUsers(){if(!isAdmin())return;const snap=await getDocs(collection(db,"users"));directoryUsers=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.officerName||"").localeCompare(b.officerName||""));}
-
-function renderDashboard(){const c=$("profiles");if(!c)return;const search=$("searchInput")?.value.toLowerCase()||"";const filter=$("filterRank")?.value||"";const sort=$("sortSelect")?.value||"rank";const list=sorted(profiles.filter(p=>p.fullName.toLowerCase().includes(search)&&(!filter||p.rank===filter)),sort);c.innerHTML=list.map(card).join("");$("emptyMessage").hidden=list.length>0;bindCards()}
-function renderGroup(){const title=$("gangTitle");if(!title)return;const gang=new URLSearchParams(location.search).get("gang")||GANGS[0];title.textContent=gang;const list=sorted(profiles.filter(p=>p.gang===gang));$("profiles").innerHTML=list.map(card).join("");$("emptyMessage").hidden=list.length>0;bindCards()}
-
-function resetForm(){const f=$("profileForm");if(f)f.reset();if($("editingId"))$("editingId").value="";if($("formTitle"))$("formTitle").textContent="Add Profile";if($("saveButton"))$("saveButton").textContent="Save Profile";if($("photoPreview")){ $("photoPreview").src=""; $("photoPreview").hidden=true; } if($("photoFileName"))$("photoFileName").textContent="No picture selected";}
-function editProfile(id){const p=profiles.find(x=>x.id===id);if(!p||!canEdit(p))return;if(!$("profileFormPanel")){location.href=`profile.html?id=${encodeURIComponent(id)}&edit=1`;return}$("editingId").value=p.id;$("fullName").value=p.fullName||"";$("dob").value=p.dob||"";$("rank").value=p.rank||"";$("gang").value=p.gang||"";if($("photoPreview")){if(p.photo){$("photoPreview").src=p.photo;$("photoPreview").hidden=false}else{$("photoPreview").src="";$("photoPreview").hidden=true}}if($("photoFileName"))$("photoFileName").textContent=p.photo?"Current picture will be kept unless replaced":"No picture selected";$("formTitle").textContent="Edit Profile";$("saveButton").textContent="Update Profile";$("profileFormPanel").hidden=false;$("profileFormPanel").scrollIntoView({behavior:"smooth"})}
-async function deleteProfile(id){const p=profiles.find(x=>x.id===id);if(!p||!isAdmin()||!confirm(`Delete ${p.fullName}? This cannot be undone.`))return;try{await deleteDoc(doc(db,"profiles",id));profiles=profiles.filter(x=>x.id!==id);renderDashboard();renderGroup()}catch(e){alert(e.message)}}
-
-function compressImage(file){return new Promise((resolve,reject)=>{if(!file.type.startsWith("image/"))return reject(new Error("Please choose an image file."));const reader=new FileReader();reader.onerror=()=>reject(new Error("Could not read image."));reader.onload=()=>{const img=new Image();img.onerror=()=>reject(new Error("Could not process image."));img.onload=()=>{const max=512;let w=img.width,h=img.height;if(w>h&&w>max){h=Math.round(h*max/w);w=max}else if(h>=w&&h>max){w=Math.round(w*max/h);h=max}const canvas=document.createElement("canvas");canvas.width=w;canvas.height=h;canvas.getContext("2d").drawImage(img,0,0,w,h);let q=.82,data=canvas.toDataURL("image/jpeg",q);while(data.length>350000&&q>.35){q-=.08;data=canvas.toDataURL("image/jpeg",q)}if(data.length>350000)return reject(new Error("This image is still too large after compression. Please choose a smaller photo."));resolve(data)};img.src=reader.result};reader.readAsDataURL(file)})}
-
-async function openEditorPermissions(id){
- if(!isAdmin())return;managingProfileId=id;const p=profiles.find(x=>x.id===id);if(!p)return;await loadUsers();$("editorProfileName").textContent=`Choose which Editors may edit ${p.fullName}.`;
- const editors=directoryUsers.filter(u=>u.role==="editor");
- $("editorList").innerHTML=editors.length?editors.map(u=>`<label class="editor-row"><input type="checkbox" value="${u.id}" ${(p.editorIds||[]).includes(u.id)?"checked":""}><span><strong>${esc(u.officerName||u.email)}</strong><small>${esc(u.email||"")}</small></span></label>`).join(""):`<p class="panel-copy">There are no accounts with the Editor role yet. Use Manage Users first.</p>`;
- $("editorPanel").hidden=false;$("editorPanel").scrollIntoView({behavior:"smooth"});
 }
 async function saveEditorPermissions(){
  if(!isAdmin()||!managingProfileId)return;const status=$("editorsStatus");try{const editorIds=[...document.querySelectorAll("#editorList input:checked")].map(i=>i.value);await updateDoc(doc(db,"profiles",managingProfileId),{editorIds,lastEditedByUid:currentUser.uid,lastEditedByOfficerName:currentAccount.officerName,lastEditedAt:serverTimestamp()});const p=profiles.find(x=>x.id===managingProfileId);if(p)p.editorIds=editorIds;status.textContent="Editor permissions saved.";status.className="success";renderDashboard();renderGroup()}catch(e){status.textContent=e.message||"Could not save permissions.";status.className="error"}}
@@ -181,8 +237,163 @@ function setupDashboard(){
 }
 
 function setupLogin(){const f=$("loginForm");if(!f)return;f.onsubmit=async e=>{e.preventDefault();const status=$("loginStatus");try{await signInWithEmailAndPassword(auth,$("email").value.trim(),$("password").value);status.textContent="Signed in successfully.";status.className="success"}catch(err){status.textContent=err.message.replace("Firebase: ","");status.className="error"}}}
-function setupRegister(){const f=$("registerForm");if(!f)return;f.onsubmit=async e=>{e.preventDefault();const status=$("registerStatus");const officerName=$("officerName").value.trim(),email=$("email").value.trim(),password=$("password").value,confirmPassword=$("confirmPassword").value,code=$("adminSetupCode").value;let credential=null;if(password!==confirmPassword){status.textContent="Passwords do not match.";status.className="error";return}if(!officerName){status.textContent="Officer Name is required.";status.className="error";return}try{credential=await createUserWithEmailAndPassword(auth,email,password);const uid=credential.user.uid;const userRef=doc(db,"users",uid);if(code){const batch=writeBatch(db);batch.set(userRef,{officerName,email,role:"admin",adminSetupCode:code,createdAt:serverTimestamp()});batch.update(doc(db,"system","bootstrap"),{enabled:false});await batch.commit();await updateDoc(userRef,{adminSetupCode:deleteField()});}else{await setDoc(userRef,{officerName,email,role:"user",createdAt:serverTimestamp()});}status.textContent="Account created successfully.";status.className="success";setTimeout(()=>location.href="index.html",500)}catch(err){if(credential?.user){try{await deleteUser(credential.user)}catch(_){}}status.textContent=err.message.replace("Firebase: ","");status.className="error"}}}
+function setupRegister(){
+  const f = $("registerForm");
+  if(!f) return;
 
+  f.onsubmit = async e => {
+    e.preventDefault();
+
+    const status = $("registerStatus");
+
+    const officerName = $("officerName").value.trim();
+    const email = $("email").value.trim();
+    const password = $("password").value;
+    const confirmPassword = $("confirmPassword").value;
+    const code = $("adminSetupCode").value.trim();
+
+    let credential = null;
+
+    /*
+     * Basic validation
+     */
+    if(password !== confirmPassword){
+      status.textContent = "Passwords do not match.";
+      status.className = "error";
+      return;
+    }
+
+    if(!officerName){
+      status.textContent = "Officer Name is required.";
+      status.className = "error";
+      return;
+    }
+
+    if(!email){
+      status.textContent = "Email is required.";
+      status.className = "error";
+      return;
+    }
+
+    try {
+
+      /*
+       * STEP 1
+       * Create the Firebase Authentication account.
+       */
+      credential = await createUserWithEmailAndPassword(
+        auth,
+        email,
+        password
+      );
+
+      const user = credential.user;
+      const uid = user.uid;
+
+      /*
+       * STEP 2
+       * Store Officer Name in Firebase Authentication too.
+       *
+       * This gives us a recovery source if the Firestore users/{UID}
+       * document is ever accidentally deleted.
+       */
+      await updateProfile(user, {
+        displayName: officerName
+      });
+
+      /*
+       * STEP 3
+       * Create the matching Firestore users/{UID} document.
+       */
+      const userRef = doc(db, "users", uid);
+
+      /*
+       * If an Admin Bootstrap Code was supplied, use the existing
+       * administrator bootstrap process.
+       */
+      if(code){
+
+        const batch = writeBatch(db);
+
+        batch.set(userRef, {
+          officerName,
+          email,
+          role: "admin",
+          adminSetupCode: code,
+          createdAt: serverTimestamp()
+        });
+
+        batch.update(
+          doc(db, "system", "bootstrap"),
+          {
+            enabled: false
+          }
+        );
+
+        await batch.commit();
+
+        /*
+         * Remove the temporary bootstrap code from the user's
+         * Firestore document after successful setup.
+         */
+        await updateDoc(userRef, {
+          adminSetupCode: deleteField()
+        });
+
+      } else {
+
+        /*
+         * Normal account.
+         */
+        await setDoc(userRef, {
+          officerName,
+          email,
+          role: "user",
+          createdAt: serverTimestamp()
+        });
+      }
+
+      /*
+       * Registration succeeded.
+       */
+      status.textContent = "Account created successfully.";
+      status.className = "success";
+
+      /*
+       * Give Firebase a moment to finish the auth state change,
+       * then send the new user to the directory.
+       */
+      setTimeout(() => {
+        location.href = "index.html";
+      }, 500);
+
+    } catch(err) {
+
+      /*
+       * If Firestore setup failed after Authentication succeeded,
+       * remove the newly-created Authentication account so we don't
+       * leave an orphaned login account behind.
+       */
+      if(credential?.user){
+
+        try{
+          await deleteUser(credential.user);
+        }catch(_){
+          /*
+           * Ignore cleanup failure here.
+           * The original registration error is more important.
+           */
+        }
+      }
+
+      status.textContent =
+        err.message?.replace("Firebase: ", "") ||
+        "Could not create account.";
+
+      status.className = "error";
+    }
+  };
+}
 function setupPWA(){
   if("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(()=>{});
 }
