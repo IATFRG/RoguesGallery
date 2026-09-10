@@ -48,7 +48,29 @@ function bindCards(){
 }
 function sorted(list,sort="rank"){const a=[...list];if(sort==="name")return a.sort((x,y)=>x.fullName.localeCompare(y.fullName));if(sort==="newest")return a.sort((x,y)=>(y.createdAtMs||0)-(x.createdAtMs||0));return a.sort((x,y)=>rankIndex(x.rank)-rankIndex(y.rank)||x.fullName.localeCompare(y.fullName))}
 
-async function loadAccount(){const snap=await getDoc(doc(db,"users",currentUser.uid));if(!snap.exists())throw new Error("Your directory account profile could not be found.");currentAccount=snap.data();renderAccount()}
+async function loadAccount(){
+  const userRef = doc(db, "users", currentUser.uid);
+  const snap = await getDoc(userRef);
+
+  if (!snap.exists()) {
+    await setDoc(userRef, {
+      officerName: currentUser.displayName || "",
+      email: currentUser.email || "",
+      role: "user",
+      createdAt: serverTimestamp()
+    });
+
+    currentAccount = {
+      officerName: currentUser.displayName || "",
+      email: currentUser.email || "",
+      role: "user"
+    };
+  } else {
+    currentAccount = snap.data();
+  }
+
+  renderAccount();
+}
 async function loadProfiles(){const snap=await getDocs(profileCollection());profiles=snap.docs.map(d=>({id:d.id,...d.data()}));}
 async function loadUsers(){if(!isAdmin())return;const snap=await getDocs(collection(db,"users"));directoryUsers=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.officerName||"").localeCompare(b.officerName||""));}
 
