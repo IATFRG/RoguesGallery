@@ -1333,24 +1333,23 @@ function setupRegister() {
 console.log("OFFICER NAME INPUT:", officerNameInput);
 console.log("OFFICER NAME VALUE:", officerNameInput?.value);
 
-const officerName = officerNameInput?.value.trim() || "";
+const officerNameField = document.getElementById("officerName");
+const emailField = document.getElementById("email");
+const passwordField = document.getElementById("password");
+const confirmPasswordField = document.getElementById("confirmPassword");
+const adminCodeField = document.getElementById("adminSetupCode");
 
-    const email =
-      $("email")
-        .value
-        .trim();
-
-    const password =
-      $("password")
-        .value;
-
-    const confirmPassword =
-      $("confirmPassword")
-        .value;
-
-    const code =
-      $("adminSetupCode")
-        .value;
+const officerName = officerNameField ? officerNameField.value.trim() : "";
+    if (!officerName) {
+  status.textContent = "Please enter the Officer Name.";
+  status.className = "error";
+  officerNameField?.focus();
+  return;
+}
+const email = emailField ? emailField.value.trim() : "";
+const password = passwordField ? passwordField.value : "";
+const confirmPassword = confirmPasswordField ? confirmPasswordField.value : "";
+const code = adminCodeField ? adminCodeField.value.trim() : "";
 
     let credential = null;
 
