@@ -1409,6 +1409,8 @@ const officerName = officerNameInput?.value.trim() || "";
        * Create the matching Firestore users/{UID}
        * document.
        */
+      console.log("OFFICER NAME ENTERED:", officerName);
+      console.log("AUTH DISPLAY NAME:", credential.user.displayName);
       const uid =
         credential.user.uid;
 
