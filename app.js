@@ -1,4 +1,5 @@
 import { auth, db } from "./firebase-config.js";
+
 import {
   onAuthStateChanged,
   createUserWithEmailAndPassword,
@@ -21,6 +22,12 @@ import {
   deleteField
 } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
 
+
+/* =========================================================
+   ROGUE GALLERY
+   Global configuration
+========================================================= */
+
 const RANKS = [
   "Gang Leader",
   "Sub Leader",
@@ -41,14 +48,10 @@ const GANGS = [
   "Rasta City Gang"
 ];
 
-const CAUTIONS = [
-  "Firearm Offender",
-  "Drug Offender",
-  "Violent",
-  "Breaker",
-  "Sexual Offender",
-  "Murderer"
-];
+
+/* =========================================================
+   GLOBAL STATE
+========================================================= */
 
 let profiles = [];
 let currentUser = null;
@@ -56,225 +59,364 @@ let currentAccount = null;
 let directoryUsers = [];
 let managingProfileId = null;
 
+/*
+  IMPORTANT:
+  Firebase automatically signs a user in immediately after
+  createUserWithEmailAndPassword() succeeds.
+
+  This flag prevents onAuthStateChanged() from trying to load
+  the account before registration has finished writing the
+  users/{uid} Firestore document.
+*/
+let registrationInProgress = false;
+
+
+/* =========================================================
+   HELPERS
+========================================================= */
+
 const $ = id => document.getElementById(id);
 
-const rankIndex = r => {
-  const i = RANKS.indexOf(r);
-  return i < 0 ? 999 : i;
+const rankIndex = rank => {
+  const index = RANKS.indexOf(rank);
+  return index < 0 ? 999 : index;
 };
 
-const esc = v => {
-  const d = document.createElement("div");
-  d.textContent = v ?? "";
-  return d.innerHTML;
+const esc = value => {
+  const div = document.createElement("div");
+  div.textContent = value ?? "";
+  return div.innerHTML;
 };
 
-const formatDate = v =>
-  v
-    ? new Date(v + "T00:00:00").toLocaleDateString(undefined, {
-        day: "2-digit",
-        month: "short",
-        year: "numeric"
-      })
-    : "";
+const formatDate = value => {
+  if (!value) return "";
 
-const profileCollection = () => collection(db, "profiles");
+  return new Date(
+    value + "T00:00:00"
+  ).toLocaleDateString(
+    undefined,
+    {
+      day: "2-digit",
+      month: "short",
+      year: "numeric"
+    }
+  );
+};
 
-const canEdit = p =>
+const profileCollection = () =>
+  collection(db, "profiles");
+
+const canEdit = profile =>
   currentAccount &&
   (
     currentAccount.role === "admin" ||
-    p.createdByUid === currentUser.uid ||
-    (p.editorIds || []).includes(currentUser.uid)
+    profile.createdByUid === currentUser.uid ||
+    (profile.editorIds || []).includes(currentUser.uid)
   );
 
-const isAdmin = () => currentAccount?.role === "admin";
+const isAdmin = () =>
+  currentAccount?.role === "admin";
+
+
+/* =========================================================
+   PWA
+========================================================= */
+
+function setupPWA() {
+  if (
+    "serviceWorker" in navigator &&
+    location.protocol !== "file:"
+  ) {
+    navigator.serviceWorker
+      .register("./sw.js")
+      .catch(() => {});
+  }
+}
+
+
+/* =========================================================
+   NAVIGATION
+========================================================= */
 
 function nav() {
-  const c = $("gangNavigation");
-  if (!c) return;
+  const container = $("gangNavigation");
 
-  const current = new URLSearchParams(location.search).get("gang");
+  if (!container) return;
 
-  c.innerHTML = GANGS.map(
-    g =>
-      `<a class="nav-item gang-link ${
-        current === g ? "active" : ""
-      }" href="group.html?gang=${encodeURIComponent(g)}">${esc(g)}</a>`
-  ).join("");
+  const current =
+    new URLSearchParams(location.search).get("gang");
 
-  const menu = c.closest(".gang-menu");
-  if (menu && current) menu.open = true;
+  container.innerHTML = GANGS
+    .map(
+      gang =>
+        `
+        <a
+          class="nav-item gang-link ${current === gang ? "active" : ""}"
+          href="group.html?gang=${encodeURIComponent(gang)}"
+        >
+          ${esc(gang)}
+        </a>
+        `
+    )
+    .join("");
 }
+
+
+/* =========================================================
+   ACCOUNT DISPLAY
+========================================================= */
 
 function renderAccount() {
   if ($("officerDisplay")) {
     $("officerDisplay").textContent =
-      currentAccount?.officerName || currentUser?.email || "";
+      currentAccount?.officerName ||
+      currentUser?.displayName ||
+      currentUser?.email ||
+      "";
   }
 
   if ($("roleDisplay")) {
     $("roleDisplay").textContent =
-      (currentAccount?.role || "user").toUpperCase();
+      (
+        currentAccount?.role ||
+        "user"
+      ).toUpperCase();
   }
 }
 
-function card(p) {
-  const img = p.photo
-    ? `<img class="profile-image" src="${p.photo}" alt="Photo of ${esc(
-        p.fullName
-      )}">`
-    : `<div class="profile-image" aria-label="No profile photo"></div>`;
+
+/* =========================================================
+   PROFILE CARD
+========================================================= */
+
+function card(profile) {
+  const image = profile.photo
+    ? `
+      <img
+        class="profile-image"
+        src="${profile.photo}"
+        alt="Photo of ${esc(profile.fullName)}"
+      >
+    `
+    : `
+      <div
+        class="profile-image"
+        aria-label="No profile photo"
+      ></div>
+    `;
 
   const actions = [];
 
-  if (canEdit(p)) {
+  if (canEdit(profile)) {
     actions.push(
-      `<button class="primary-button edit-profile" data-id="${p.id}" type="button" title="Edit profile" aria-label="Edit profile">✎</button>`
+      `
+      <button
+        class="primary-button edit-profile"
+        data-id="${profile.id}"
+        type="button"
+      >
+        ✎ Edit
+      </button>
+      `
     );
   }
 
   if (isAdmin()) {
     actions.push(
-      `<button class="secondary-button editors-profile icon-only-button" data-id="${p.id}" type="button" title="Manage editor permissions" aria-label="Manage editor permissions">⚿</button>`,
-      `<button class="danger-button delete-profile icon-only-button" data-id="${p.id}" type="button" title="Delete profile" aria-label="Delete profile">🗑</button>`
+      `
+      <button
+        class="secondary-button editors-profile"
+        data-id="${profile.id}"
+        type="button"
+      >
+        Permissions
+      </button>
+      `
+    );
+
+    actions.push(
+      `
+      <button
+        class="danger-button delete-profile"
+        data-id="${profile.id}"
+        type="button"
+      >
+        🗑 Delete
+      </button>
+      `
     );
   }
 
-  const audit = p.createdByOfficerName
-    ? `<p class="audit-line">Added by ${esc(p.createdByOfficerName)}${
-        p.lastEditedByOfficerName
-          ? ` · Edited by ${esc(p.lastEditedByOfficerName)}`
-          : ""
-      }</p>`
-    : "";
+  const audit =
+    profile.createdByOfficerName
+      ? `
+        <p class="audit-line">
+          Added by ${esc(profile.createdByOfficerName)}
+          ${
+            profile.lastEditedByOfficerName
+              ? ` · Edited by ${esc(profile.lastEditedByOfficerName)}`
+              : ""
+          }
+        </p>
+      `
+      : "";
 
   return `
-    <article
-      class="profile-card profile-card-clickable"
-      data-profile-id="${p.id}"
-      tabindex="0"
-      role="button"
-      aria-label="Open profile for ${esc(p.fullName)}"
-    >
+    <article class="profile-card">
+
       <div class="card-top">
-        <div class="card-photo-wrap">${img}</div>
-        <span class="rank-badge">${esc(p.rank)}</span>
+        ${image}
+
+        <span class="rank-badge">
+          ${esc(profile.rank)}
+        </span>
       </div>
 
-      <h3>${esc(p.fullName)}</h3>
-      <p>▣ D.O.B: ${esc(formatDate(p.dob))}</p>
-      <p>♙ Rank: ${esc(p.rank)}</p>
-      <p>♛ Gang: ${esc(p.gang)}</p>
+      <h3>
+        ${esc(profile.fullName)}
+      </h3>
+
+      <p>
+        ▣ D.O.B:
+        ${esc(formatDate(profile.dob))}
+      </p>
+
+      <p>
+        ♙ Rank:
+        ${esc(profile.rank)}
+      </p>
+
+      <p>
+        ♛ Gang:
+        ${esc(profile.gang)}
+      </p>
 
       ${audit}
 
       ${
         actions.length
-          ? `<div class="card-actions">${actions.join("")}</div>`
+          ? `
+            <div class="card-actions">
+              ${actions.join("")}
+            </div>
+          `
           : ""
       }
+
     </article>
   `;
 }
 
+
+/* =========================================================
+   PROFILE CARD BUTTONS
+========================================================= */
+
 function bindCards() {
-  document.querySelectorAll(".profile-card-clickable").forEach(c => {
-    const open = () => {
-      const id = c.dataset.profileId;
-      if (id) {
-        location.href = `profile.html?id=${encodeURIComponent(id)}`;
-      }
-    };
-
-    c.addEventListener("click", e => {
-      if (e.target.closest("button,a,input,select,textarea")) return;
-      open();
+  document
+    .querySelectorAll(".edit-profile")
+    .forEach(button => {
+      button.onclick = () =>
+        editProfile(button.dataset.id);
     });
 
-    c.addEventListener("keydown", e => {
-      if (
-        (e.key === "Enter" || e.key === " ") &&
-        !e.target.closest("button,input,select,textarea")
-      ) {
-        e.preventDefault();
-        open();
-      }
+  document
+    .querySelectorAll(".delete-profile")
+    .forEach(button => {
+      button.onclick = () =>
+        deleteProfile(button.dataset.id);
     });
-  });
 
-  document.querySelectorAll(".edit-profile").forEach(b => {
-    b.onclick = e => {
-      e.stopPropagation();
-      editProfile(b.dataset.id);
-    };
-  });
-
-  document.querySelectorAll(".delete-profile").forEach(b => {
-    b.onclick = e => {
-      e.stopPropagation();
-      deleteProfile(b.dataset.id);
-    };
-  });
-
-  document.querySelectorAll(".editors-profile").forEach(b => {
-    b.onclick = e => {
-      e.stopPropagation();
-      openEditorPermissions(b.dataset.id);
-    };
-  });
+  document
+    .querySelectorAll(".editors-profile")
+    .forEach(button => {
+      button.onclick = () =>
+        openEditorPermissions(button.dataset.id);
+    });
 }
 
+
+/* =========================================================
+   SORTING
+========================================================= */
+
 function sorted(list, sort = "rank") {
-  const a = [...list];
+  const result = [...list];
 
   if (sort === "name") {
-    return a.sort((x, y) =>
-      x.fullName.localeCompare(y.fullName)
+    return result.sort(
+      (a, b) =>
+        (a.fullName || "").localeCompare(
+          b.fullName || ""
+        )
     );
   }
 
   if (sort === "newest") {
-    return a.sort(
-      (x, y) => (y.createdAtMs || 0) - (x.createdAtMs || 0)
+    return result.sort(
+      (a, b) =>
+        (b.createdAtMs || 0) -
+        (a.createdAtMs || 0)
     );
   }
 
-  return a.sort(
-    (x, y) =>
-      rankIndex(x.rank) - rankIndex(y.rank) ||
-      x.fullName.localeCompare(y.fullName)
+  return result.sort(
+    (a, b) =>
+      rankIndex(a.rank) -
+        rankIndex(b.rank) ||
+      (a.fullName || "").localeCompare(
+        b.fullName || ""
+      )
   );
 }
 
 
 /* =========================================================
-   USER ACCOUNT
-   ========================================================= */
+   LOAD CURRENT ACCOUNT
+========================================================= */
 
 async function loadAccount() {
-  const userRef = doc(db, "users", currentUser.uid);
-  const snap = await getDoc(userRef);
+  if (!currentUser) {
+    throw new Error(
+      "No authenticated user was found."
+    );
+  }
 
-  if (!snap.exists()) {
-    // Automatically create a Firestore directory account
-    // for an existing Firebase Authentication user.
-    //
-    // displayName will be available for NEW users because
-    // registration now saves the Officer Name to Firebase Auth.
+  const userRef =
+    doc(
+      db,
+      "users",
+      currentUser.uid
+    );
+
+  const snapshot =
+    await getDoc(userRef);
+
+  /*
+    If an Auth account already exists but the Firestore
+    users document does not, create it automatically.
+
+    This is especially useful for your existing Firebase
+    Authentication users.
+  */
+  if (!snapshot.exists()) {
     const officerName =
       currentUser.displayName ||
       currentUser.email ||
       "Unnamed Officer";
 
-    const email = currentUser.email || "";
+    const email =
+      currentUser.email || "";
 
-    await setDoc(userRef, {
-      officerName,
-      email,
-      role: "user",
-      createdAt: serverTimestamp()
-    });
+    await setDoc(
+      userRef,
+      {
+        officerName,
+        email,
+        role: "user",
+        createdAt: serverTimestamp()
+      }
+    );
 
     currentAccount = {
       officerName,
@@ -282,7 +424,48 @@ async function loadAccount() {
       role: "user"
     };
   } else {
-    currentAccount = snap.data();
+    currentAccount =
+      snapshot.data();
+
+    /*
+      If the Firestore document exists but officerName is
+      empty, repair it from Firebase Authentication.
+    */
+    if (
+      !currentAccount.officerName &&
+      currentUser.displayName
+    ) {
+      await updateDoc(
+        userRef,
+        {
+          officerName:
+            currentUser.displayName
+        }
+      );
+
+      currentAccount.officerName =
+        currentUser.displayName;
+    }
+
+    /*
+      If officerName is still empty, use the email as a
+      last-resort fallback and save it.
+    */
+    if (
+      !currentAccount.officerName &&
+      currentUser.email
+    ) {
+      await updateDoc(
+        userRef,
+        {
+          officerName:
+            currentUser.email
+        }
+      );
+
+      currentAccount.officerName =
+        currentUser.email;
+    }
   }
 
   renderAccount();
@@ -290,39 +473,69 @@ async function loadAccount() {
 
 
 /* =========================================================
-   PROFILES
-   ========================================================= */
+   LOAD PROFILES
+========================================================= */
 
 async function loadProfiles() {
-  const snap = await getDocs(profileCollection());
+  const snapshot =
+    await getDocs(
+      profileCollection()
+    );
 
-  profiles = snap.docs.map(d => ({
-    id: d.id,
-    ...d.data()
-  }));
+  profiles =
+    snapshot.docs.map(
+      document => ({
+        id: document.id,
+        ...document.data()
+      })
+    );
 }
+
+
+/* =========================================================
+   LOAD USERS
+========================================================= */
 
 async function loadUsers() {
   if (!isAdmin()) return;
 
-  const snap = await getDocs(collection(db, "users"));
-
-  directoryUsers = snap.docs
-    .map(d => ({
-      id: d.id,
-      ...d.data()
-    }))
-    .sort((a, b) =>
-      (a.officerName || "").localeCompare(b.officerName || "")
+  const snapshot =
+    await getDocs(
+      collection(db, "users")
     );
+
+  directoryUsers =
+    snapshot.docs
+      .map(
+        document => ({
+          id: document.id,
+          ...document.data()
+        })
+      )
+      .sort(
+        (a, b) =>
+          (a.officerName || "")
+            .localeCompare(
+              b.officerName || ""
+            )
+      );
 }
 
+
+/* =========================================================
+   DASHBOARD RENDER
+========================================================= */
+
 function renderDashboard() {
-  const c = $("profiles");
-  if (!c) return;
+  const container =
+    $("profiles");
+
+  if (!container) return;
 
   const search =
-    $("searchInput")?.value.toLowerCase() || "";
+    $("searchInput")
+      ?.value
+      .toLowerCase() || "";
 
   const filter =
     $("filterRank")?.value || "";
@@ -330,360 +543,575 @@ function renderDashboard() {
   const sort =
     $("sortSelect")?.value || "rank";
 
-  const list = sorted(
-    profiles.filter(
-      p =>
-        p.fullName.toLowerCase().includes(search) &&
-        (!filter || p.rank === filter)
-    ),
-    sort
-  );
+  const list =
+    sorted(
+      profiles.filter(
+        profile =>
+          (profile.fullName || "")
+            .toLowerCase()
+            .includes(search) &&
+          (
+            !filter ||
+            profile.rank === filter
+          )
+      ),
+      sort
+    );
 
-  c.innerHTML = list.map(card).join("");
+  container.innerHTML =
+    list
+      .map(card)
+      .join("");
 
-  $("emptyMessage").hidden = list.length > 0;
+  if ($("emptyMessage")) {
+    $("emptyMessage").hidden =
+      list.length > 0;
+  }
 
   bindCards();
 }
 
+
+/* =========================================================
+   GROUP PAGE RENDER
+========================================================= */
+
 function renderGroup() {
-  const title = $("gangTitle");
+  const title =
+    $("gangTitle");
+
   if (!title) return;
 
   const gang =
-    new URLSearchParams(location.search).get("gang") ||
+    new URLSearchParams(
+      location.search
+    ).get("gang") ||
     GANGS[0];
 
-  title.textContent = gang;
+  title.textContent =
+    gang;
 
-  const list = sorted(
-    profiles.filter(p => p.gang === gang)
-  );
+  const list =
+    sorted(
+      profiles.filter(
+        profile =>
+          profile.gang === gang
+      )
+    );
 
-  $("profiles").innerHTML = list.map(card).join("");
+  if ($("profiles")) {
+    $("profiles").innerHTML =
+      list
+        .map(card)
+        .join("");
+  }
 
-  $("emptyMessage").hidden = list.length > 0;
+  if ($("emptyMessage")) {
+    $("emptyMessage").hidden =
+      list.length > 0;
+  }
 
   bindCards();
 }
 
-function resetForm() {
-  const f = $("profileForm");
 
-  if (f) f.reset();
+/* =========================================================
+   RESET PROFILE FORM
+========================================================= */
+
+function resetForm() {
+  const form =
+    $("profileForm");
+
+  if (form) {
+    form.reset();
+  }
 
   if ($("editingId")) {
     $("editingId").value = "";
   }
 
   if ($("formTitle")) {
-    $("formTitle").textContent = "Add Profile";
+    $("formTitle").textContent =
+      "Add Profile";
   }
 
   if ($("saveButton")) {
-    $("saveButton").textContent = "Save Profile";
-  }
-
-  if ($("photoPreview")) {
-    $("photoPreview").src = "";
-    $("photoPreview").hidden = true;
-  }
-
-  if ($("photoFileName")) {
-    $("photoFileName").textContent =
-      "No picture selected";
+    $("saveButton").textContent =
+      "Save Profile";
   }
 }
 
+
+/* =========================================================
+   EDIT PROFILE
+========================================================= */
+
 function editProfile(id) {
-  const p = profiles.find(x => x.id === id);
+  const profile =
+    profiles.find(
+      item => item.id === id
+    );
 
-  if (!p || !canEdit(p)) return;
-
-  if (!$("profileFormPanel")) {
-    location.href =
-      `profile.html?id=${encodeURIComponent(id)}&edit=1`;
+  if (
+    !profile ||
+    !canEdit(profile)
+  ) {
     return;
   }
 
-  $("editingId").value = p.id;
-  $("fullName").value = p.fullName || "";
-  $("dob").value = p.dob || "";
-  $("rank").value = p.rank || "";
-  $("gang").value = p.gang || "";
+  if (!$("profileFormPanel")) {
+    location.href =
+      "index.html";
 
-  if ($("photoPreview")) {
-    if (p.photo) {
-      $("photoPreview").src = p.photo;
-      $("photoPreview").hidden = false;
-    } else {
-      $("photoPreview").src = "";
-      $("photoPreview").hidden = true;
-    }
+    return;
   }
 
-  if ($("photoFileName")) {
-    $("photoFileName").textContent = p.photo
-      ? "Current picture will be kept unless replaced"
-      : "No picture selected";
+  $("editingId").value =
+    profile.id;
+
+  $("fullName").value =
+    profile.fullName || "";
+
+  $("dob").value =
+    profile.dob || "";
+
+  $("rank").value =
+    profile.rank || "";
+
+  $("gang").value =
+    profile.gang || "";
+
+  if ($("formTitle")) {
+    $("formTitle").textContent =
+      "Edit Profile";
   }
 
-  $("formTitle").textContent = "Edit Profile";
-  $("saveButton").textContent = "Update Profile";
-  $("profileFormPanel").hidden = false;
+  if ($("saveButton")) {
+    $("saveButton").textContent =
+      "Update Profile";
+  }
 
-  $("profileFormPanel").scrollIntoView({
-    behavior: "smooth"
-  });
+  $("profileFormPanel").hidden =
+    false;
+
+  $("profileFormPanel")
+    .scrollIntoView({
+      behavior: "smooth"
+    });
 }
 
+
+/* =========================================================
+   DELETE PROFILE
+========================================================= */
+
 async function deleteProfile(id) {
-  const p = profiles.find(x => x.id === id);
+  const profile =
+    profiles.find(
+      item => item.id === id
+    );
 
   if (
-    !p ||
-    !isAdmin() ||
-    !confirm(`Delete ${p.fullName}? This cannot be undone.`)
+    !profile ||
+    !isAdmin()
+  ) {
+    return;
+  }
+
+  if (
+    !confirm(
+      `Delete ${profile.fullName}? This cannot be undone.`
+    )
   ) {
     return;
   }
 
   try {
-    await deleteDoc(doc(db, "profiles", id));
+    await deleteDoc(
+      doc(
+        db,
+        "profiles",
+        id
+      )
+    );
 
-    profiles = profiles.filter(x => x.id !== id);
+    profiles =
+      profiles.filter(
+        item => item.id !== id
+      );
 
     renderDashboard();
     renderGroup();
-  } catch (e) {
-    alert(e.message);
+  } catch (error) {
+    alert(
+      error.message ||
+      "Could not delete profile."
+    );
   }
 }
 
 
 /* =========================================================
-   IMAGE
-   ========================================================= */
+   COMPRESS PROFILE IMAGE
+========================================================= */
 
 function compressImage(file) {
-  return new Promise((resolve, reject) => {
-    if (!file.type.startsWith("image/")) {
-      return reject(
-        new Error("Please choose an image file.")
-      );
-    }
+  return new Promise(
+    (resolve, reject) => {
+      if (
+        !file.type.startsWith(
+          "image/"
+        )
+      ) {
+        reject(
+          new Error(
+            "Please choose an image file."
+          )
+        );
 
-    const reader = new FileReader();
+        return;
+      }
 
-    reader.onerror = () =>
-      reject(new Error("Could not read image."));
+      const reader =
+        new FileReader();
 
-    reader.onload = () => {
-      const img = new Image();
+      reader.onerror = () =>
+        reject(
+          new Error(
+            "Could not read image."
+          )
+        );
 
-      img.onerror = () =>
-        reject(new Error("Could not process image."));
+      reader.onload = () => {
+        const image =
+          new Image();
 
-      img.onload = () => {
-        const max = 512;
-
-        let w = img.width;
-        let h = img.height;
-
-        if (w > h && w > max) {
-          h = Math.round((h * max) / w);
-          w = max;
-        } else if (h >= w && h > max) {
-          w = Math.round((w * max) / h);
-          h = max;
-        }
-
-        const canvas =
-          document.createElement("canvas");
-
-        canvas.width = w;
-        canvas.height = h;
-
-        canvas
-          .getContext("2d")
-          .drawImage(img, 0, 0, w, h);
-
-        let q = 0.82;
-
-        let data =
-          canvas.toDataURL("image/jpeg", q);
-
-        while (
-          data.length > 350000 &&
-          q > 0.35
-        ) {
-          q -= 0.08;
-          data =
-            canvas.toDataURL("image/jpeg", q);
-        }
-
-        if (data.length > 350000) {
-          return reject(
+        image.onerror = () =>
+          reject(
             new Error(
-              "This image is still too large after compression. Please choose a smaller photo."
+              "Could not process image."
             )
           );
-        }
 
-        resolve(data);
+        image.onload = () => {
+          const max = 512;
+
+          let width =
+            image.width;
+
+          let height =
+            image.height;
+
+          if (
+            width > height &&
+            width > max
+          ) {
+            height =
+              Math.round(
+                height *
+                max /
+                width
+              );
+
+            width = max;
+          } else if (
+            height >= width &&
+            height > max
+          ) {
+            width =
+              Math.round(
+                width *
+                max /
+                height
+              );
+
+            height = max;
+          }
+
+          const canvas =
+            document.createElement(
+              "canvas"
+            );
+
+          canvas.width =
+            width;
+
+          canvas.height =
+            height;
+
+          const context =
+            canvas.getContext(
+              "2d"
+            );
+
+          context.drawImage(
+            image,
+            0,
+            0,
+            width,
+            height
+          );
+
+          let quality = 0.82;
+
+          let data =
+            canvas.toDataURL(
+              "image/jpeg",
+              quality
+            );
+
+          while (
+            data.length > 350000 &&
+            quality > 0.35
+          ) {
+            quality -= 0.08;
+
+            data =
+              canvas.toDataURL(
+                "image/jpeg",
+                quality
+              );
+          }
+
+          if (
+            data.length > 350000
+          ) {
+            reject(
+              new Error(
+                "This image is still too large after compression. Please choose a smaller photo."
+              )
+            );
+
+            return;
+          }
+
+          resolve(data);
+        };
+
+        image.src =
+          reader.result;
       };
 
-      img.src = reader.result;
-    };
-
-    reader.readAsDataURL(file);
-  });
+      reader.readAsDataURL(file);
+    }
+  );
 }
 
 
 /* =========================================================
    EDITOR PERMISSIONS
-   ========================================================= */
+========================================================= */
 
 async function openEditorPermissions(id) {
   if (!isAdmin()) return;
 
-  managingProfileId = id;
+  managingProfileId =
+    id;
 
-  const p = profiles.find(x => x.id === id);
+  const profile =
+    profiles.find(
+      item => item.id === id
+    );
 
-  if (!p) return;
+  if (!profile) return;
 
   await loadUsers();
 
-  $("editorProfileName").textContent =
-    `Choose which Editors may edit ${p.fullName}.`;
+  if ($("editorProfileName")) {
+    $("editorProfileName").textContent =
+      `Choose which Editors may edit ${profile.fullName}.`;
+  }
 
   const editors =
     directoryUsers.filter(
-      u => u.role === "editor"
+      user =>
+        user.role === "editor"
     );
 
-  $("editorList").innerHTML = editors.length
-    ? editors
-        .map(
-          u => `
-            <label class="editor-row">
-              <input
-                type="checkbox"
-                value="${u.id}"
-                ${(p.editorIds || []).includes(u.id)
-                  ? "checked"
-                  : ""}
-              >
-              <span>
-                <strong>${esc(
-                  u.officerName || u.email
-                )}</strong>
-                <small>${esc(
-                  u.email || ""
-                )}</small>
-              </span>
-            </label>
-          `
-        )
-        .join("")
-    : `
-        <p class="panel-copy">
-          There are no accounts with the Editor role yet.
-          Use Manage Users first.
-        </p>
-      `;
+  if ($("editorList")) {
+    $("editorList").innerHTML =
+      editors.length
+        ? editors
+            .map(
+              user =>
+                `
+                <label class="editor-row">
 
-  $("editorPanel").hidden = false;
+                  <input
+                    type="checkbox"
+                    value="${user.id}"
+                    ${
+                      (profile.editorIds || [])
+                        .includes(user.id)
+                        ? "checked"
+                        : ""
+                    }
+                  >
 
-  $("editorPanel").scrollIntoView({
-    behavior: "smooth"
-  });
+                  <span>
+                    <strong>
+                      ${esc(
+                        user.officerName ||
+                        user.email
+                      )}
+                    </strong>
+
+                    <small>
+                      ${esc(
+                        user.email || ""
+                      )}
+                    </small>
+                  </span>
+
+                </label>
+                `
+            )
+            .join("")
+        : `
+          <p class="panel-copy">
+            There are no accounts with the Editor role yet.
+            Use Manage Users first.
+          </p>
+        `;
+  }
+
+  if ($("editorPanel")) {
+    $("editorPanel").hidden =
+      false;
+
+    $("editorPanel")
+      .scrollIntoView({
+        behavior: "smooth"
+      });
+  }
 }
 
-async function saveEditorPermissions() {
-  if (!isAdmin() || !managingProfileId) return;
 
-  const status = $("editorsStatus");
+/* =========================================================
+   SAVE EDITOR PERMISSIONS
+========================================================= */
+
+async function saveEditorPermissions() {
+  if (
+    !isAdmin() ||
+    !managingProfileId
+  ) {
+    return;
+  }
+
+  const status =
+    $("editorsStatus");
 
   try {
-    const editorIds = [
-      ...document.querySelectorAll(
-        "#editorList input:checked"
-      )
-    ].map(i => i.value);
+    const editorIds =
+      [
+        ...document.querySelectorAll(
+          "#editorList input:checked"
+        )
+      ].map(
+        input =>
+          input.value
+      );
 
     await updateDoc(
-      doc(db, "profiles", managingProfileId),
+      doc(
+        db,
+        "profiles",
+        managingProfileId
+      ),
       {
         editorIds,
-        lastEditedByUid: currentUser.uid,
+        lastEditedByUid:
+          currentUser.uid,
         lastEditedByOfficerName:
           currentAccount.officerName,
-        lastEditedAt: serverTimestamp()
+        lastEditedAt:
+          serverTimestamp()
       }
     );
 
-    const p = profiles.find(
-      x => x.id === managingProfileId
-    );
+    const profile =
+      profiles.find(
+        item =>
+          item.id ===
+          managingProfileId
+      );
 
-    if (p) {
-      p.editorIds = editorIds;
+    if (profile) {
+      profile.editorIds =
+        editorIds;
     }
 
-    status.textContent =
-      "Editor permissions saved.";
+    if (status) {
+      status.textContent =
+        "Editor permissions saved.";
 
-    status.className = "success";
+      status.className =
+        "success";
+    }
 
     renderDashboard();
     renderGroup();
-  } catch (e) {
-    status.textContent =
-      e.message ||
-      "Could not save permissions.";
 
-    status.className = "error";
+  } catch (error) {
+    if (status) {
+      status.textContent =
+        error.message ||
+        "Could not save permissions.";
+
+      status.className =
+        "error";
+    }
   }
 }
 
 
 /* =========================================================
    USER MANAGEMENT
-   ========================================================= */
+========================================================= */
 
 async function renderUsers() {
-  if (!isAdmin() || !$("usersList")) return;
+  if (
+    !isAdmin() ||
+    !$("usersList")
+  ) {
+    return;
+  }
 
   await loadUsers();
 
   $("usersList").innerHTML =
     directoryUsers
       .map(
-        u => `
+        user =>
+          `
           <div class="user-row">
+
             <div>
               <strong>
                 ${esc(
-                  u.officerName ||
+                  user.officerName ||
                   "Unnamed Officer"
                 )}
               </strong>
+
               <small>
-                ${esc(u.email || "")}
+                ${esc(
+                  user.email || ""
+                )}
               </small>
             </div>
 
             <select
               class="role-select"
-              data-id="${u.id}"
+              data-id="${user.id}"
             >
+
               <option
                 value="user"
                 ${
-                  u.role === "user"
+                  user.role === "user"
                     ? "selected"
                     : ""
                 }
@@ -694,7 +1122,7 @@ async function renderUsers() {
               <option
                 value="editor"
                 ${
-                  u.role === "editor"
+                  user.role === "editor"
                     ? "selected"
                     : ""
                 }
@@ -705,837 +1133,132 @@ async function renderUsers() {
               <option
                 value="admin"
                 ${
-                  u.role === "admin"
+                  user.role === "admin"
                     ? "selected"
                     : ""
                 }
               >
                 Administrator
               </option>
+
             </select>
+
           </div>
-        `
+          `
       )
       .join("");
 
   document
-    .querySelectorAll(".role-select")
-    .forEach(s => {
-      s.onchange = () =>
+    .querySelectorAll(
+      ".role-select"
+    )
+    .forEach(select => {
+      select.onchange = () =>
         changeRole(
-          s.dataset.id,
-          s.value
+          select.dataset.id,
+          select.value
         );
     });
 }
 
-async function changeRole(uid, roleValue) {
-  const status = $("usersStatus");
+
+/* =========================================================
+   CHANGE USER ROLE
+========================================================= */
+
+async function changeRole(
+  uid,
+  roleValue
+) {
+  const status =
+    $("usersStatus");
 
   try {
+    /*
+      Do not store the administrator setup code.
+      Role changes simply update the role field.
+    */
     await updateDoc(
-      doc(db, "users", uid),
+      doc(
+        db,
+        "users",
+        uid
+      ),
       {
-        role: roleValue,
-        adminSetupCode: deleteField()
+        role: roleValue
       }
     );
 
-    const u = directoryUsers.find(
-      x => x.id === uid
-    );
+    const user =
+      directoryUsers.find(
+        item =>
+          item.id === uid
+      );
 
-    if (u) {
-      u.role = roleValue;
+    if (user) {
+      user.role =
+        roleValue;
     }
 
-    status.textContent =
-      "User role updated.";
+    if (status) {
+      status.textContent =
+        "User role updated.";
 
-    status.className = "success";
+      status.className =
+        "success";
+    }
 
-    if (uid === currentUser.uid) {
-      currentAccount.role = roleValue;
+    /*
+      If the currently logged-in user changes their own
+      role, update the local account immediately.
+    */
+    if (
+      uid === currentUser.uid
+    ) {
+      currentAccount.role =
+        roleValue;
+
       renderAccount();
     }
-  } catch (e) {
-    status.textContent =
-      e.message ||
-      "Could not update role.";
 
-    status.className = "error";
-  }
-}
-
-
-/* =========================================================
-   PROFILE DETAILS
-   ========================================================= */
-
-async function saveProfileDetails(id) {
-  const p = profiles.find(x => x.id === id);
-
-  if (
-    !p ||
-    !currentUser ||
-    !currentAccount
-  ) {
-    return;
-  }
-
-  const cautions = [
-    ...document.querySelectorAll(
-      "#detailCautions input:checked"
-    )
-  ].map(i => i.value);
-
-  const notes =
-    $("detailNotes")?.value.slice(0, 255) ||
-    "";
-
-  const status = $("detailStatus");
-
-  try {
+  } catch (error) {
     if (status) {
       status.textContent =
-        "Saving changes...";
-      status.className = "";
-    }
+        error.message ||
+        "Could not update role.";
 
-    await updateDoc(
-      doc(db, "profiles", id),
-      {
-        cautions,
-        notes,
-        lastEditedByUid: currentUser.uid,
-        lastEditedByOfficerName:
-          currentAccount.officerName,
-        lastEditedAt:
-          serverTimestamp()
-      }
-    );
-
-    p.cautions = cautions;
-    p.notes = notes;
-    p.lastEditedByUid =
-      currentUser.uid;
-    p.lastEditedByOfficerName =
-      currentAccount.officerName;
-
-    renderProfileDetail(p, false);
-
-    if (status) {
-      status.textContent =
-        "Profile updated successfully.";
-      status.className = "success";
-    }
-  } catch (e) {
-    if (status) {
-      status.textContent =
-        e.message ||
-        "Could not save profile.";
-      status.className = "error";
-    }
-  }
-}
-
-function openProfilePhoto(p) {
-  if (!p?.photo) return;
-
-  let modal = $("profilePhotoModal");
-
-  if (!modal) {
-    modal =
-      document.createElement("div");
-
-    modal.id =
-      "profilePhotoModal";
-
-    modal.className =
-      "profile-photo-modal";
-
-    modal.innerHTML = `
-      <div
-        class="profile-photo-backdrop"
-        data-close-photo
-      ></div>
-
-      <div
-        class="profile-photo-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Enlarged profile photo"
-      >
-        <button
-          type="button"
-          class="profile-photo-close"
-          aria-label="Close enlarged photo"
-          data-close-photo
-        >
-          ×
-        </button>
-
-        <img
-          id="profilePhotoLarge"
-          class="profile-photo-large"
-          alt=""
-        >
-
-        <div
-          id="profilePhotoWatermark"
-          class="profile-photo-watermark"
-        ></div>
-      </div>
-    `;
-
-    document.body.appendChild(modal);
-
-    modal
-      .querySelectorAll("[data-close-photo]")
-      .forEach(el =>
-        el.addEventListener(
-          "click",
-          closeProfilePhoto
-        )
-      );
-  }
-
-  const image =
-    $("profilePhotoLarge");
-
-  const watermark =
-    $("profilePhotoWatermark");
-
-  image.src = p.photo;
-  image.alt =
-    `Photo of ${p.fullName || "profile"}`;
-
-  watermark.textContent =
-    p.fullName || "";
-
-  modal.hidden = false;
-
-  document.body.classList.add(
-    "photo-modal-open"
-  );
-
-  document.addEventListener(
-    "keydown",
-    handlePhotoModalKey
-  );
-}
-
-function closeProfilePhoto() {
-  const modal =
-    $("profilePhotoModal");
-
-  if (!modal) return;
-
-  modal.hidden = true;
-
-  document.body.classList.remove(
-    "photo-modal-open"
-  );
-
-  document.removeEventListener(
-    "keydown",
-    handlePhotoModalKey
-  );
-}
-
-function handlePhotoModalKey(e) {
-  if (e.key === "Escape") {
-    closeProfilePhoto();
-  }
-}
-
-function renderProfileDetail(
-  p,
-  editing = false
-) {
-  const photo =
-    $("detailPhoto");
-
-  if (photo) {
-    if (p.photo) {
-      photo.src = p.photo;
-      photo.hidden = false;
-
-      photo.onclick = () =>
-        openProfilePhoto(p);
-
-      photo.setAttribute(
-        "role",
-        "button"
-      );
-
-      photo.setAttribute(
-        "tabindex",
-        "0"
-      );
-
-      photo.setAttribute(
-        "aria-label",
-        `Enlarge photo of ${
-          p.fullName || "profile"
-        }`
-      );
-
-      photo.onkeydown = e => {
-        if (
-          e.key === "Enter" ||
-          e.key === " "
-        ) {
-          e.preventDefault();
-          openProfilePhoto(p);
-        }
-      };
-    } else {
-      photo.removeAttribute("src");
-      photo.hidden = true;
-      photo.onclick = null;
-      photo.removeAttribute("role");
-      photo.removeAttribute("tabindex");
-    }
-  }
-
-  if ($("detailName")) {
-    $("detailName").textContent =
-      p.fullName || "";
-  }
-
-  if ($("detailRank")) {
-    $("detailRank").textContent =
-      p.rank || "";
-  }
-
-  if ($("detailDob")) {
-    $("detailDob").textContent =
-      `D.O.B: ${formatDate(p.dob)}`;
-  }
-
-  if ($("detailAddress")) {
-    $("detailAddress").textContent =
-      p.address
-        ? `Address: ${p.address}`
-        : "Address: Not provided";
-  }
-
-  if ($("detailGang")) {
-    $("detailGang").textContent =
-      p.gang || "";
-  }
-
-  const selected =
-    new Set(p.cautions || []);
-
-  const box =
-    $("detailCautions");
-
-  if (box) {
-    box.innerHTML =
-      CAUTIONS.map(
-        c => `
-          <label class="caution-row">
-            <input
-              type="checkbox"
-              value="${esc(c)}"
-              ${
-                selected.has(c)
-                  ? "checked"
-                  : ""
-              }
-              ${
-                editing
-                  ? ""
-                  : "disabled"
-              }
-            >
-            <span>${esc(c)}</span>
-          </label>
-        `
-      ).join("");
-  }
-
-  const notes =
-    $("detailNotes");
-
-  if (notes) {
-    notes.value =
-      p.notes || "";
-
-    notes.readOnly =
-      !editing;
-
-    notes.maxLength = 255;
-  }
-
-  const counter =
-    $("notesCounter");
-
-  if (counter) {
-    counter.textContent =
-      `${(p.notes || "").length} / 255`;
-  }
-
-  const editBtn =
-    $("detailEditButton");
-
-  const saveBtn =
-    $("detailSaveButton");
-
-  const cancelBtn =
-    $("detailCancelButton");
-
-  if (editBtn) {
-    editBtn.hidden =
-      editing || !currentUser;
-
-    editBtn.onclick = () =>
-      renderProfileDetail(
-        p,
-        true
-      );
-  }
-
-  if (saveBtn) {
-    saveBtn.hidden =
-      !editing;
-
-    saveBtn.onclick = () =>
-      saveProfileDetails(p.id);
-  }
-
-  if (cancelBtn) {
-    cancelBtn.hidden =
-      !editing;
-
-    cancelBtn.onclick = () =>
-      renderProfileDetail(
-        p,
-        false
-      );
-  }
-
-  const del =
-    $("detailDeleteButton");
-
-  if (del) {
-    del.hidden =
-      !isAdmin();
-
-    del.onclick = () =>
-      deleteProfileFromDetail(
-        p.id
-      );
-  }
-
-  const perm =
-    $("detailPermissionsButton");
-
-  if (perm) {
-    perm.hidden =
-      !isAdmin();
-
-    perm.onclick = () =>
-      openEditorPermissionsFromDetail(
-        p
-      );
-  }
-
-  if (notes) {
-    notes.oninput = () => {
-      if (counter) {
-        counter.textContent =
-          `${notes.value.length} / 255`;
-      }
-    };
-  }
-
-  const editPhotoNote =
-    $("detailEditHint");
-
-  if (editPhotoNote) {
-    editPhotoNote.hidden =
-      !editing;
-  }
-}
-
-async function deleteProfileFromDetail(id) {
-  const p = profiles.find(
-    x => x.id === id
-  );
-
-  if (
-    !p ||
-    !isAdmin() ||
-    !confirm(
-      `Delete ${p.fullName}? This cannot be undone.`
-    )
-  ) {
-    return;
-  }
-
-  try {
-    await deleteDoc(
-      doc(db, "profiles", id)
-    );
-
-    location.href =
-      "index.html";
-  } catch (e) {
-    const s =
-      $("detailStatus");
-
-    if (s) {
-      s.textContent =
-        e.message;
-
-      s.className =
+      status.className =
         "error";
     }
   }
 }
 
-async function openEditorPermissionsFromDetail(
-  p
-) {
-  if (!isAdmin()) return;
-
-  await openEditorPermissions(
-    p.id
-  );
-}
-
-async function setupProfileDetail() {
-  const id =
-    new URLSearchParams(
-      location.search
-    ).get("id");
-
-  if (!id) return;
-
-  await loadProfiles();
-
-  const p =
-    profiles.find(
-      x => x.id === id
-    );
-
-  if (!p) {
-    if ($("detailStatus")) {
-      $("detailStatus").textContent =
-        "Profile not found.";
-    }
-
-    return;
-  }
-
-  if ($("backButton")) {
-    $("backButton").onclick =
-      () =>
-        history.length > 1
-          ? history.back()
-          : (location.href =
-              "index.html");
-  }
-
-  if (
-    $("detailPermissionsButton")
-  ) {
-    $("detailPermissionsButton")
-      .hidden = !isAdmin();
-  }
-
-  renderProfileDetail(
-    p,
-    new URLSearchParams(
-      location.search
-    ).get("edit") === "1" &&
-      canEdit(p)
-  );
-}
-
 
 /* =========================================================
-   LOGIN / LOGOUT
-   ========================================================= */
+   LOGOUT
+========================================================= */
 
 function setupLogout() {
-  const b =
+  const button =
     $("logoutButton");
 
-  if (b) {
-    b.onclick = async () => {
-      await signOut(auth);
-      location.href =
-        "login.html";
+  if (!button) return;
+
+  button.onclick =
+    async () => {
+      try {
+        await signOut(auth);
+      } finally {
+        location.href =
+          "login.html";
+      }
     };
-  }
-}
-
-function setupLogin() {
-  const f =
-    $("loginForm");
-
-  if (!f) return;
-
-  f.onsubmit = async e => {
-    e.preventDefault();
-
-    const status =
-      $("loginStatus");
-
-    try {
-      await signInWithEmailAndPassword(
-        auth,
-        $("email").value.trim(),
-        $("password").value
-      );
-
-      status.textContent =
-        "Signed in successfully.";
-
-      status.className =
-        "success";
-    } catch (err) {
-      status.textContent =
-        err.message.replace(
-          "Firebase: ",
-          ""
-        );
-
-      status.className =
-        "error";
-    }
-  };
 }
 
 
 /* =========================================================
-   REGISTRATION
-   ========================================================= */
-
-function setupRegister() {
-  const f =
-    $("registerForm");
-
-  if (!f) return;
-
-  f.onsubmit = async e => {
-    e.preventDefault();
-
-    const status =
-      $("registerStatus");
-
-    const officerNameInput = $("officerName");
-
-console.log("OFFICER NAME INPUT:", officerNameInput);
-console.log("OFFICER NAME VALUE:", officerNameInput?.value);
-
-const officerNameField = document.getElementById("officerName");
-const emailField = document.getElementById("email");
-const passwordField = document.getElementById("password");
-const confirmPasswordField = document.getElementById("confirmPassword");
-const adminCodeField = document.getElementById("adminSetupCode");
-
-const officerName = officerNameField ? officerNameField.value.trim() : "";
-    if (!officerName) {
-  status.textContent = "Please enter the Officer Name.";
-  status.className = "error";
-  officerNameField?.focus();
-  return;
-}
-const email = emailField ? emailField.value.trim() : "";
-const password = passwordField ? passwordField.value : "";
-const confirmPassword = confirmPasswordField ? confirmPasswordField.value : "";
-const code = adminCodeField ? adminCodeField.value.trim() : "";
-
-    let credential = null;
-
-    if (
-      password !==
-      confirmPassword
-    ) {
-      status.textContent =
-        "Passwords do not match.";
-
-      status.className =
-        "error";
-
-      return;
-    }
-
-    if (!officerName) {
-      status.textContent =
-        "Officer Name is required.";
-
-      status.className =
-        "error";
-
-      return;
-    }
-
-    try {
-      /*
-       * STEP 1:
-       * Create the Firebase Authentication account.
-       */
-      credential =
-        await createUserWithEmailAndPassword(
-          auth,
-          email,
-          password
-        );
-
-      /*
-       * STEP 2:
-       * Save the Officer Name in Firebase Authentication.
-       *
-       * This is important for existing-user recovery
-       * through loadAccount().
-       */
-      await updateProfile(
-        credential.user,
-        {
-          displayName:
-            officerName
-        }
-      );
-
-      /*
-       * STEP 3:
-       * Create the matching Firestore users/{UID}
-       * document.
-       */
-      console.log("OFFICER NAME ENTERED:", officerName);
-      console.log("AUTH DISPLAY NAME:", credential.user.displayName);
-      const uid =
-        credential.user.uid;
-
-      const userRef =
-        doc(
-          db,
-          "users",
-          uid
-        );
-
-      /*
-       * INITIAL ADMINISTRATOR SETUP
-       */
-      if (code) {
-        const batch =
-          writeBatch(db);
-
-        batch.set(
-          userRef,
-          {
-            officerName,
-            email,
-            role: "admin",
-            adminSetupCode: code,
-            createdAt:
-              serverTimestamp()
-          }
-        );
-
-        batch.update(
-          doc(
-            db,
-            "system",
-            "bootstrap"
-          ),
-          {
-            enabled: false
-          }
-        );
-
-        await batch.commit();
-
-        /*
-         * Remove the secret setup code immediately
-         * after the administrator account is created.
-         */
-        await updateDoc(
-          userRef,
-          {
-            adminSetupCode:
-              deleteField()
-          }
-        );
-      } else {
-        /*
-         * NORMAL USER
-         */
-        await setDoc(
-          userRef,
-          {
-            officerName,
-            email,
-            role: "user",
-            createdAt:
-              serverTimestamp()
-          }
-        );
-      }
-
-      status.textContent =
-        "Account created successfully.";
-
-      status.className =
-        "success";
-
-      setTimeout(
-        () => {
-          location.href =
-            "index.html";
-        },
-        500
-      );
-    } catch (err) {
-      /*
-       * If Firestore registration fails after
-       * Authentication was created, remove the
-       * Authentication account so we don't leave
-       * an incomplete account behind.
-       */
-      if (credential?.user) {
-        try {
-          await deleteUser(
-            credential.user
-          );
-        } catch (_) {}
-      }
-
-      status.textContent =
-        err.message.replace(
-          "Firebase: ",
-          ""
-        );
-
-      status.className =
-        "error";
-    }
-  };
-}
-
-
-/* =========================================================
-   PWA
-   ========================================================= */
-
-function setupPWA() {
-  if ("serviceWorker" in navigator) {
-    navigator.serviceWorker
-      .register("./sw.js")
-      .catch(() => {});
-  }
-}
-
-
-/* =========================================================
-   DASHBOARD
-   ========================================================= */
+   DASHBOARD SETUP
+========================================================= */
 
 function setupDashboard() {
   const form =
@@ -1543,181 +1266,161 @@ function setupDashboard() {
 
   if (!form) return;
 
-  $("showAddProfile").onclick =
+
+  /* -----------------------------------------
+     ADD PROFILE
+  ----------------------------------------- */
+
+  $("showAddProfile")?.addEventListener(
+    "click",
     () => {
       resetForm();
 
-      $("profileFormPanel").hidden =
-        false;
+      if ($("profileFormPanel")) {
+        $("profileFormPanel").hidden =
+          false;
 
-      $("profileFormPanel")
-        .scrollIntoView({
-          behavior: "smooth"
-        });
-    };
+        $("profileFormPanel")
+          .scrollIntoView({
+            behavior: "smooth"
+          });
+      }
+    }
+  );
 
-  $("closeFormButton").onclick =
-    () =>
-      ($("profileFormPanel").hidden =
-        true);
 
-  $("cancelEditButton").onclick =
-    resetForm;
+  /* -----------------------------------------
+     CLOSE PROFILE FORM
+  ----------------------------------------- */
 
-  $("showUsersButton")
-    ?.addEventListener(
-      "click",
-      async () => {
-        await renderUsers();
+  $("closeFormButton")?.addEventListener(
+    "click",
+    () => {
+      if ($("profileFormPanel")) {
+        $("profileFormPanel").hidden =
+          true;
+      }
+    }
+  );
 
-        $("userManagementPanel")
-          .hidden = false;
+
+  /* -----------------------------------------
+     CANCEL EDIT
+  ----------------------------------------- */
+
+  $("cancelEditButton")?.addEventListener(
+    "click",
+    resetForm
+  );
+
+
+  /* -----------------------------------------
+     MANAGE USERS
+  ----------------------------------------- */
+
+  $("showUsersButton")?.addEventListener(
+    "click",
+    async () => {
+      await renderUsers();
+
+      if ($("userManagementPanel")) {
+        $("userManagementPanel").hidden =
+          false;
 
         $("userManagementPanel")
           .scrollIntoView({
             behavior: "smooth"
           });
       }
-    );
+    }
+  );
 
-  const photoInput =
-    $("photo");
 
-  const cameraInput =
-    $("cameraPhoto");
+  /* -----------------------------------------
+     CLOSE USER MANAGEMENT
+  ----------------------------------------- */
 
-  const chooseInput =
-    $("choosePhoto");
-
-  const usePhoto = file => {
-    if (!file) return;
-
-    const dt =
-      new DataTransfer();
-
-    dt.items.add(file);
-
-    photoInput.files =
-      dt.files;
-
-    const r =
-      new FileReader();
-
-    r.onload = () => {
-      if ($("photoPreview")) {
-        $("photoPreview").src =
-          r.result;
-
-        $("photoPreview").hidden =
-          false;
+  $("closeUsersButton")?.addEventListener(
+    "click",
+    () => {
+      if ($("userManagementPanel")) {
+        $("userManagementPanel").hidden =
+          true;
       }
+    }
+  );
 
-      if ($("photoFileName")) {
-        $("photoFileName")
-          .textContent =
-          file.name ||
-          "Picture selected";
+
+  /* -----------------------------------------
+     CLOSE EDITOR PANEL
+  ----------------------------------------- */
+
+  $("closeEditorsButton")?.addEventListener(
+    "click",
+    () => {
+      if ($("editorPanel")) {
+        $("editorPanel").hidden =
+          true;
       }
-    };
-
-    r.readAsDataURL(file);
-  };
-
-  cameraInput?.addEventListener(
-    "change",
-    () =>
-      usePhoto(
-        cameraInput.files[0]
-      )
+    }
   );
 
-  chooseInput?.addEventListener(
-    "change",
-    () =>
-      usePhoto(
-        chooseInput.files[0]
-      )
+
+  /* -----------------------------------------
+     SAVE EDITOR PERMISSIONS
+  ----------------------------------------- */
+
+  $("saveEditorsButton")?.addEventListener(
+    "click",
+    saveEditorPermissions
   );
 
-  photoInput?.addEventListener(
-    "change",
-    () =>
-      usePhoto(
-        photoInput.files[0]
-      )
-  );
 
-  $("takePhotoButton")
-    ?.addEventListener(
-      "click",
-      () =>
-        cameraInput?.click()
-    );
-
-  $("choosePhotoButton")
-    ?.addEventListener(
-      "click",
-      () =>
-        chooseInput?.click()
-    );
-
-  $("closeUsersButton")
-    ?.addEventListener(
-      "click",
-      () =>
-        ($("userManagementPanel")
-          .hidden = true)
-    );
-
-  $("closeEditorsButton")
-    ?.addEventListener(
-      "click",
-      () =>
-        ($("editorPanel")
-          .hidden = true)
-    );
-
-  $("saveEditorsButton")
-    ?.addEventListener(
-      "click",
-      saveEditorPermissions
-    );
+  /* =======================================================
+     PROFILE FORM SUBMIT
+  ======================================================= */
 
   form.onsubmit =
-    async e => {
-      e.preventDefault();
+    async event => {
+      event.preventDefault();
 
       const id =
-        $("editingId").value ||
+        $("editingId")?.value ||
         crypto.randomUUID();
 
-      const old =
+      const oldProfile =
         profiles.find(
-          x => x.id === id
+          profile =>
+            profile.id === id
         );
 
+      /*
+        Existing profile:
+        make sure the current user is allowed to edit it.
+      */
       if (
-        old &&
-        !canEdit(old)
+        oldProfile &&
+        !canEdit(oldProfile)
       ) {
         return;
       }
 
       let photo =
-        old?.photo || "";
+        oldProfile?.photo || "";
 
       const file =
-        $("photo").files[0];
+        $("photo")?.files?.[0];
 
       const status =
         $("status");
 
       try {
-        status.textContent =
-          "Saving profile...";
+        if (status) {
+          status.textContent =
+            "Saving profile...";
 
-        status.className =
-          "";
+          status.className = "";
+        }
 
         if (file) {
           photo =
@@ -1726,48 +1429,38 @@ function setupDashboard() {
             );
         }
 
-        const p = {
+        const profileData = {
           fullName:
             $("fullName")
-              .value
-              .trim(),
+              ?.value
+              .trim() || "",
 
           dob:
-            $("dob").value,
-
-          address:
-            $("address")
-              .value
-              .trim(),
+            $("dob")?.value || "",
 
           rank:
-            $("rank").value,
+            $("rank")?.value || "",
 
           gang:
-            $("gang").value,
+            $("gang")?.value || "",
 
           photo,
 
-          cautions:
-            old?.cautions || [],
-
-          notes:
-            old?.notes || "",
-
           createdAtMs:
-            old?.createdAtMs ||
+            oldProfile?.createdAtMs ||
             Date.now(),
 
           createdByUid:
-            old?.createdByUid ||
+            oldProfile?.createdByUid ||
             currentUser.uid,
 
           createdByOfficerName:
-            old?.createdByOfficerName ||
+            oldProfile?.createdByOfficerName ||
             currentAccount.officerName,
 
           editorIds:
-            old?.editorIds || [],
+            oldProfile?.editorIds ||
+            [],
 
           lastEditedByUid:
             currentUser.uid,
@@ -1779,30 +1472,41 @@ function setupDashboard() {
             serverTimestamp()
         };
 
+
+        /* -----------------------------------------
+           SAVE TO FIRESTORE
+        ----------------------------------------- */
+
         await setDoc(
           doc(
             db,
             "profiles",
             id
           ),
-          p,
+          profileData,
           {
             merge: true
           }
         );
 
+
+        /* -----------------------------------------
+           UPDATE LOCAL DATA
+        ----------------------------------------- */
+
         const saved = {
           id,
-          ...p
+          ...profileData
         };
 
-        const i =
+        const index =
           profiles.findIndex(
-            x => x.id === id
+            profile =>
+              profile.id === id
           );
 
-        if (i >= 0) {
-          profiles[i] =
+        if (index >= 0) {
+          profiles[index] =
             saved;
         } else {
           profiles.push(
@@ -1810,51 +1514,70 @@ function setupDashboard() {
           );
         }
 
-        status.textContent =
-          i >= 0
-            ? "Profile updated successfully."
-            : "Profile added successfully.";
 
-        status.className =
-          "success";
+        /* -----------------------------------------
+           SUCCESS MESSAGE
+        ----------------------------------------- */
+
+        if (status) {
+          status.textContent =
+            index >= 0
+              ? "Profile updated successfully."
+              : "Profile added successfully.";
+
+          status.className =
+            "success";
+        }
 
         resetForm();
 
         renderDashboard();
-      } catch (err) {
-        status.textContent =
-          err.message ||
-          "Could not save profile.";
 
-        status.className =
-          "error";
+      } catch (error) {
+        if (status) {
+          status.textContent =
+            error.message ||
+            "Could not save profile.";
+
+          status.className =
+            "error";
+        }
       }
     };
+
+
+  /* =======================================================
+     SEARCH / FILTER / SORT
+  ======================================================= */
 
   [
     "searchInput",
     "filterRank",
     "sortSelect"
-  ].forEach(id =>
+  ].forEach(id => {
     $(id)?.addEventListener(
       "input",
       renderDashboard
-    )
+    );
+  });
+
+  $("filterRank")?.addEventListener(
+    "change",
+    renderDashboard
   );
 
-  $("filterRank")
-    ?.addEventListener(
-      "change",
-      renderDashboard
-    );
+  $("sortSelect")?.addEventListener(
+    "change",
+    renderDashboard
+  );
 
-  $("sortSelect")
-    ?.addEventListener(
-      "change",
-      renderDashboard
-    );
 
-  $("exportButton").onclick =
+  /* =======================================================
+     EXPORT BACKUP
+  ======================================================= */
+
+  $("exportButton")?.addEventListener(
+    "click",
     () => {
       const blob =
         new Blob(
@@ -1871,58 +1594,74 @@ function setupDashboard() {
           }
         );
 
-      const a =
-        document.createElement(
-          "a"
-        );
-
-      a.href =
+      const url =
         URL.createObjectURL(
           blob
         );
 
-      a.download =
+      const anchor =
+        document.createElement(
+          "a"
+        );
+
+      anchor.href =
+        url;
+
+      anchor.download =
         "rogue-gallery-backup.json";
 
-      a.click();
+      anchor.click();
 
       URL.revokeObjectURL(
-        a.href
+        url
       );
-    };
+    }
+  );
 
-  $("importInput").onchange =
-    async e => {
+
+  /* =======================================================
+     IMPORT BACKUP
+  ======================================================= */
+
+  $("importInput")?.addEventListener(
+    "change",
+    async event => {
       const status =
         $("backupStatus");
 
       try {
+        const file =
+          event.target.files?.[0];
+
+        if (!file) {
+          return;
+        }
+
         const data =
           JSON.parse(
-            await e.target.files[0].text()
+            await file.text()
           );
 
-        if (!Array.isArray(data)) {
+        if (
+          !Array.isArray(data)
+        ) {
           throw new Error(
             "Invalid backup file."
           );
         }
 
-        for (const raw of data) {
+        for (
+          const raw of data
+        ) {
           const id =
             crypto.randomUUID();
 
-          const p = {
+          const profile = {
             fullName:
-              raw.fullName ||
-              "",
+              raw.fullName || "",
 
             dob:
               raw.dob || "",
-
-            address:
-              raw.address ||
-              "",
 
             rank:
               raw.rank ||
@@ -1933,24 +1672,7 @@ function setupDashboard() {
               GANGS[0],
 
             photo:
-              raw.photo ||
-              "",
-
-            cautions:
-              Array.isArray(
-                raw.cautions
-              )
-                ? raw.cautions
-                : [],
-
-            notes:
-              typeof raw.notes ===
-              "string"
-                ? raw.notes.slice(
-                    0,
-                    255
-                  )
-                : "",
+              raw.photo || "",
 
             createdAtMs:
               Date.now(),
@@ -1979,7 +1701,7 @@ function setupDashboard() {
               "profiles",
               id
             ),
-            p
+            profile
           );
         }
 
@@ -1987,20 +1709,503 @@ function setupDashboard() {
 
         renderDashboard();
 
-        status.textContent =
-          "Backup imported successfully.";
+        if (status) {
+          status.textContent =
+            "Backup imported successfully.";
 
-        status.className =
-          "success";
-      } catch (err) {
-        status.textContent =
-          err.message ||
-          "Could not import this backup.";
+          status.className =
+            "success";
+        }
 
-        status.className =
-          "error";
+      } catch (error) {
+        if (status) {
+          status.textContent =
+            error.message ||
+            "Could not import this backup.";
+
+          status.className =
+            "error";
+        }
+
       } finally {
-        e.target.value = "";
+        event.target.value =
+          "";
+      }
+    }
+  );
+}
+
+
+/* =========================================================
+   LOGIN
+========================================================= */
+
+function setupLogin() {
+  const form =
+    $("loginForm");
+
+  if (!form) return;
+
+  form.onsubmit =
+    async event => {
+      event.preventDefault();
+
+      const status =
+        $("loginStatus");
+
+      try {
+        await signInWithEmailAndPassword(
+          auth,
+          $("email")
+            .value
+            .trim(),
+          $("password")
+            .value
+        );
+
+        if (status) {
+          status.textContent =
+            "Signed in successfully.";
+
+          status.className =
+            "success";
+        }
+
+      } catch (error) {
+        if (status) {
+          status.textContent =
+            error.message.replace(
+              "Firebase: ",
+              ""
+            );
+
+          status.className =
+            "error";
+        }
+      }
+    };
+}
+
+
+/* =========================================================
+   REGISTRATION
+========================================================= */
+
+function setupRegister() {
+  const form =
+    $("registerForm");
+
+  if (!form) return;
+
+  form.onsubmit =
+    async event => {
+      event.preventDefault();
+
+      const status =
+        $("registerStatus");
+
+      /*
+        VERY IMPORTANT:
+        Set this BEFORE calling
+        createUserWithEmailAndPassword().
+
+        Firebase automatically signs the new user in,
+        which fires onAuthStateChanged().
+      */
+      registrationInProgress =
+        true;
+
+
+      /* -----------------------------------------
+         READ FORM VALUES
+      ----------------------------------------- */
+
+      const officerNameField =
+        $("officerName");
+
+      const emailField =
+        $("email");
+
+      const passwordField =
+        $("password");
+
+      const confirmPasswordField =
+        $("confirmPassword");
+
+      const adminCodeField =
+        $("adminSetupCode");
+
+
+      const officerName =
+        officerNameField
+          ? officerNameField.value.trim()
+          : "";
+
+      const email =
+        emailField
+          ? emailField.value.trim()
+          : "";
+
+      const password =
+        passwordField
+          ? passwordField.value
+          : "";
+
+      const confirmPassword =
+        confirmPasswordField
+          ? confirmPasswordField.value
+          : "";
+
+      const code =
+        adminCodeField
+          ? adminCodeField.value.trim()
+          : "";
+
+
+      /* -----------------------------------------
+         VALIDATE OFFICER NAME
+      ----------------------------------------- */
+
+      if (!officerName) {
+        if (status) {
+          status.textContent =
+            "Please enter the Officer Name.";
+
+          status.className =
+            "error";
+        }
+
+        officerNameField?.focus();
+
+        registrationInProgress =
+          false;
+
+        return;
+      }
+
+
+      /* -----------------------------------------
+         VALIDATE PASSWORD
+      ----------------------------------------- */
+
+      if (
+        password !==
+        confirmPassword
+      ) {
+        if (status) {
+          status.textContent =
+            "Passwords do not match.";
+
+          status.className =
+            "error";
+        }
+
+        registrationInProgress =
+          false;
+
+        return;
+      }
+
+
+      if (
+        password.length < 6
+      ) {
+        if (status) {
+          status.textContent =
+            "Password must be at least 6 characters.";
+
+          status.className =
+            "error";
+        }
+
+        registrationInProgress =
+          false;
+
+        return;
+      }
+
+
+      let credential =
+        null;
+
+
+      try {
+
+        /* -----------------------------------------
+           CREATE FIREBASE AUTH USER
+        ----------------------------------------- */
+
+        credential =
+          await createUserWithEmailAndPassword(
+            auth,
+            email,
+            password
+          );
+
+
+        /*
+          Firebase Auth automatically signs the new user in.
+
+          We now immediately put the Officer Name into
+          Firebase Authentication as displayName.
+        */
+        await updateProfile(
+          credential.user,
+          {
+            displayName:
+              officerName
+          }
+        );
+
+
+        /* -----------------------------------------
+           GET UID
+        ----------------------------------------- */
+
+        const uid =
+          credential.user.uid;
+
+
+        /* -----------------------------------------
+           FIRESTORE USER DOCUMENT
+        ----------------------------------------- */
+
+        const userRef =
+          doc(
+            db,
+            "users",
+            uid
+          );
+
+
+        /*
+          IMPORTANT:
+          This is the actual user data that goes into
+          Firestore users/{uid}.
+
+          officerName is taken directly from the form.
+        */
+
+        const userData = {
+          officerName:
+            officerName,
+
+          email:
+            email,
+
+          role:
+            code
+              ? "admin"
+              : "user",
+
+          createdAt:
+            serverTimestamp()
+        };
+
+
+        /* -----------------------------------------
+           DEBUG LOGS
+        ----------------------------------------- */
+
+        console.log(
+          "ROGUE GALLERY REGISTRATION"
+        );
+
+        console.log(
+          "Officer Name entered:",
+          officerName
+        );
+
+        console.log(
+          "Firebase Auth displayName:",
+          credential.user.displayName
+        );
+
+        console.log(
+          "Firebase Auth UID:",
+          uid
+        );
+
+        console.log(
+          "Firestore user data:",
+          userData
+        );
+
+
+        /* -----------------------------------------
+           WRITE USER TO FIRESTORE
+        ----------------------------------------- */
+
+        /*
+          For a normal user this creates:
+
+          users
+             └── UID
+                  ├── officerName
+                  ├── email
+                  ├── role
+                  └── createdAt
+        */
+
+        if (code) {
+
+          /*
+            Preserve your existing administrator bootstrap
+            behavior.
+
+            The admin setup code itself is NOT saved.
+          */
+
+          const batch =
+            writeBatch(db);
+
+          batch.set(
+            userRef,
+            userData
+          );
+
+          batch.update(
+            doc(
+              db,
+              "system",
+              "bootstrap"
+            ),
+            {
+              enabled:
+                false
+            }
+          );
+
+          await batch.commit();
+
+        } else {
+
+          await setDoc(
+            userRef,
+            userData
+          );
+        }
+
+
+        /* -----------------------------------------
+           VERIFY THE FIRESTORE WRITE
+        ----------------------------------------- */
+
+        const verifySnapshot =
+          await getDoc(
+            userRef
+          );
+
+        if (
+          !verifySnapshot.exists()
+        ) {
+          throw new Error(
+            "The Firebase account was created, but the Firestore user record could not be verified."
+          );
+        }
+
+
+        const verifiedData =
+          verifySnapshot.data();
+
+        console.log(
+          "Firestore user record verified:",
+          verifiedData
+        );
+
+
+        /* -----------------------------------------
+           UPDATE LOCAL ACCOUNT
+        ----------------------------------------- */
+
+        currentUser =
+          credential.user;
+
+        currentAccount =
+          verifiedData;
+
+        renderAccount();
+
+
+        /* -----------------------------------------
+           SUCCESS
+        ----------------------------------------- */
+
+        if (status) {
+          status.textContent =
+            "Account created successfully.";
+
+          status.className =
+            "success";
+        }
+
+
+        /*
+          Registration is now completely finished.
+
+          Only AFTER the Firestore write and verification
+          do we allow onAuthStateChanged() to continue.
+        */
+        registrationInProgress =
+          false;
+
+
+        /* -----------------------------------------
+           GO TO DASHBOARD
+        ----------------------------------------- */
+
+        setTimeout(
+          () => {
+            location.href =
+              "index.html";
+          },
+          500
+        );
+
+
+      } catch (error) {
+
+        /*
+          If Auth was created but the Firestore write failed,
+          remove the newly-created Auth account so we don't
+          leave behind a broken account.
+        */
+        if (
+          credential?.user
+        ) {
+          try {
+            await deleteUser(
+              credential.user
+            );
+          } catch (_) {
+            /*
+              Ignore cleanup failure.
+            */
+          }
+        }
+
+
+        registrationInProgress =
+          false;
+
+
+        if (status) {
+          status.textContent =
+            error.message
+              ? error.message.replace(
+                  "Firebase: ",
+                  ""
+                )
+              : "Could not create account.";
+
+          status.className =
+            "error";
+        }
+
+        console.error(
+          "Registration error:",
+          error
+        );
       }
     };
 }
@@ -2008,24 +2213,37 @@ function setupDashboard() {
 
 /* =========================================================
    BOOT
-   ========================================================= */
+========================================================= */
 
 async function boot() {
+
   setupPWA();
+
   nav();
+
   setupLogin();
+
   setupRegister();
+
   setupLogout();
+
   setupDashboard();
+
+
+  /* =======================================================
+     AUTH STATE LISTENER
+  ======================================================= */
 
   onAuthStateChanged(
     auth,
     async user => {
+
       const page =
         location.pathname
           .split("/")
           .pop() ||
         "index.html";
+
 
       const privatePages = [
         "index.html",
@@ -2034,9 +2252,38 @@ async function boot() {
         ""
       ];
 
+
+      /* =====================================================
+         USER IS SIGNED IN
+      ===================================================== */
+
       if (user) {
+
+        /*
+          IMPORTANT REGISTRATION RACE FIX.
+
+          createUserWithEmailAndPassword()
+          automatically signs the user in.
+
+          We do NOT allow this listener to interfere while
+          setupRegister() is still creating the Firestore
+          users/{uid} record.
+        */
+        if (
+          page === "register.html" &&
+          registrationInProgress
+        ) {
+          return;
+        }
+
+
         currentUser =
           user;
+
+
+        /* -----------------------------------------
+           LOGIN / REGISTER PAGES
+        ----------------------------------------- */
 
         if (
           page === "login.html" ||
@@ -2049,49 +2296,87 @@ async function boot() {
           return;
         }
 
+
+        /* -----------------------------------------
+           LOAD ACCOUNT
+        ----------------------------------------- */
+
         try {
-          /*
-           * Loads the existing Firestore account,
-           * or automatically creates one if this
-           * Firebase Auth user does not have one yet.
-           */
+
           await loadAccount();
 
+
+          /* -----------------------------------------
+             LOAD PROFILES
+          ----------------------------------------- */
+
+          await loadProfiles();
+
+
+          /* -----------------------------------------
+             SHOW USER MANAGEMENT TO ADMINS
+          ----------------------------------------- */
+
           if (
-            page ===
-            "profile.html"
+            isAdmin() &&
+            $("showUsersButton")
           ) {
-            await setupProfileDetail();
-          } else {
-            await loadProfiles();
-
-            if (
-              isAdmin() &&
-              $("showUsersButton")
-            ) {
-              $("showUsersButton")
-                .hidden = false;
-            }
-
-            renderDashboard();
-            renderGroup();
+            $("showUsersButton").hidden =
+              false;
           }
-        } catch (e) {
-          const msg =
+
+
+          /* -----------------------------------------
+             RENDER APP
+          ----------------------------------------- */
+
+          renderDashboard();
+
+          renderGroup();
+
+
+        } catch (error) {
+
+          const messageElement =
             $("status") ||
             $("backupStatus") ||
             $("registerStatus");
 
-          if (msg) {
-            msg.textContent =
+          if (messageElement) {
+            messageElement.textContent =
               "Could not load directory account: " +
-              e.message;
+              (
+                error.message ||
+                "Unknown error."
+              );
 
-            msg.className =
+            messageElement.className =
               "error";
           }
+
+          console.error(
+            "Account loading error:",
+            error
+          );
         }
-      } else if (
+
+
+        return;
+      }
+
+
+      /* =====================================================
+         USER IS NOT SIGNED IN
+      ===================================================== */
+
+      currentUser =
+        null;
+
+      currentAccount =
+        null;
+
+
+      if (
         privatePages.includes(page)
       ) {
         location.href =
@@ -2101,8 +2386,12 @@ async function boot() {
   );
 }
 
+
+/* =========================================================
+   START APPLICATION
+========================================================= */
+
 document.addEventListener(
   "DOMContentLoaded",
   boot
 );
-```
