@@ -494,9 +494,16 @@ async function boot() {
          * Login/register pages should never remain visible
          * after authentication succeeds.
          */
-        if (
+       if (
   (page === "login.html" || page === "register.html") &&
-  !registrationInProgress
+  registrationInProgress
+) {
+  return;
+}
+
+if (
+  page === "login.html" ||
+  page === "register.html"
 ) {
   location.replace("index.html");
   return;
