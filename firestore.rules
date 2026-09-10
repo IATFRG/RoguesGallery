@@ -1,93 +1,280 @@
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
-    function signedIn() { return request.auth != null; }
-    function ownUser() { return get(/databases/$(database)/documents/users/$(request.auth.uid)); }
-    function hasAccount() { return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)); }
-    function role() { return hasAccount() ? ownUser().data.role : 'user'; }
-    function isAdmin() { return role() == 'admin'; }
-    function isOwner(uid) { return signedIn() && request.auth.uid == uid; }
-    function canEditProfile(profile) {
-      return isAdmin() || isOwner(profile.data.createdByUid) ||
-        (signedIn() && request.auth.uid in profile.data.editorIds);
+
+    // ============================================================
+    // BASIC AUTH HELPERS
+    // ============================================================
+
+    function signedIn() {
+      return request.auth != null;
     }
 
-    function validCautions(cautions) {
-      return cautions is list && cautions.hasOnly([
-        'Firearm Offender', 'Drug Offender', 'Violent', 'Breaker',
-        'Sexual Offender', 'Murderer'
-      ]);
+    function ownUser() {
+      return get(
+        /databases/$(database)/documents/users/$(request.auth.uid)
+      );
     }
+
+    function hasAccount() {
+      return signedIn() &&
+        exists(
+          /databases/$(database)/documents/users/$(request.auth.uid)
+        );
+    }
+
+    function role() {
+      return hasAccount()
+        ? ownUser().data.role
+        : 'user';
+    }
+
+    function isAdmin() {
+      return role() == 'admin';
+    }
+
+    function isOwner(uid) {
+      return signedIn() &&
+        request.auth.uid == uid;
+    }
+
+
+    // ============================================================
+    // PROFILE EDIT PERMISSIONS
+    // ============================================================
+
+    function canEditProfile(profile) {
+      return isAdmin()
+        || isOwner(profile.data.createdByUid)
+        || (
+          signedIn() &&
+          profile.data.editorIds is list &&
+          request.auth.uid in profile.data.editorIds
+        );
+    }
+
+
+    // ============================================================
+    // CAUTIONS
+    // ============================================================
+
+    function validCautions(cautions) {
+      return cautions is list &&
+        cautions.hasOnly([
+          'Firearm Offender',
+          'Drug Offender',
+          'Violent',
+          'Breaker',
+          'Sexual Offender',
+          'Murderer'
+        ]);
+    }
+
+
+    // ============================================================
+    // CAUTIONS + NOTES ONLY UPDATE
+    // ============================================================
 
     function canEditCautionsAndNotes() {
       return hasAccount() &&
+
         request.resource.data.cautions is list &&
         validCautions(request.resource.data.cautions) &&
+
         request.resource.data.notes is string &&
         request.resource.data.notes.size() <= 255 &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'cautions', 'notes', 'lastEditedByUid', 'lastEditedByOfficerName', 'lastEditedAt'
-        ]) &&
+
+        request.resource.data.diff(resource.data)
+          .affectedKeys()
+          .hasOnly([
+            'cautions',
+            'notes',
+            'lastEditedByUid',
+            'lastEditedByOfficerName',
+            'lastEditedAt'
+          ]) &&
+
         request.resource.data.lastEditedByUid == request.auth.uid;
     }
 
+
+    // ============================================================
+    // USERS
+    // ============================================================
+
     match /users/{userId} {
+
+      // A user can read their own account.
+      // Admin can read all accounts.
       allow get: if isOwner(userId) || isAdmin();
+
+      // Only admins can list all users.
       allow list: if isAdmin();
 
+
+      // ----------------------------------------------------------
+      // CREATE USER ACCOUNT
+      // ----------------------------------------------------------
+
       allow create: if isOwner(userId) && (
-        request.resource.data.role == 'user' ||
+
+        // Normal registration
+        request.resource.data.role == 'user'
+
+        ||
+
+        // First administrator registration
         (
           request.resource.data.role == 'admin' &&
+
           request.resource.data.adminSetupCode is string &&
-          exists(/databases/$(database)/documents/system/bootstrap) &&
-          get(/databases/$(database)/documents/system/bootstrap).data.enabled == true &&
-          request.resource.data.adminSetupCode == get(/databases/$(database)/documents/system/bootstrap).data.code
+
+          exists(
+            /databases/$(database)/documents/system/bootstrap
+          ) &&
+
+          get(
+            /databases/$(database)/documents/system/bootstrap
+          ).data.enabled == true &&
+
+          request.resource.data.adminSetupCode ==
+            get(
+              /databases/$(database)/documents/system/bootstrap
+            ).data.code
         )
       );
 
-      allow update: if isAdmin() || (
-        isOwner(userId) &&
-        request.resource.data.role == resource.data.role &&
-        request.resource.data.officerName == resource.data.officerName &&
-        request.resource.data.email == resource.data.email
-      );
 
+      // ----------------------------------------------------------
+      // UPDATE USER ACCOUNT
+      // ----------------------------------------------------------
+
+      allow update: if
+
+        // Admin can change any user account.
+        isAdmin()
+
+        ||
+
+        // A user can update their own officer name/email,
+        // but CANNOT change their role.
+        (
+          isOwner(userId) &&
+
+          request.resource.data.role == resource.data.role &&
+
+          request.resource.data.officerName is string &&
+          request.resource.data.officerName.size() > 0 &&
+          request.resource.data.officerName.size() <= 100 &&
+
+          request.resource.data.email is string &&
+
+          // Email must remain the authenticated Firebase email.
+          request.auth.token.email == request.resource.data.email
+        );
+
+
+      // Only admins can delete user accounts.
       allow delete: if isAdmin();
     }
+
+
+    // ============================================================
+    // PROFILES
+    // ============================================================
 
     match /profiles/{profileId} {
+
+      // Every authenticated user can view profiles.
       allow read: if signedIn();
+
+
+      // ----------------------------------------------------------
+      // CREATE PROFILE
+      // ----------------------------------------------------------
+
       allow create: if signedIn() &&
+
         request.resource.data.createdByUid == request.auth.uid &&
+
         request.resource.data.editorIds is list &&
+
         request.resource.data.address is string &&
         request.resource.data.address.size() <= 255 &&
+
         request.resource.data.lastEditedByUid == request.auth.uid;
 
+
+      // ----------------------------------------------------------
+      // UPDATE PROFILE
+      // ----------------------------------------------------------
+
       allow update: if (
-        canEditCautionsAndNotes() ||
-        (canEditProfile(resource) &&
+
+        // Everyone with an account can modify ONLY
+        // cautions/notes/audit fields.
+        canEditCautionsAndNotes()
+
+        ||
+
+        // Full profile editing.
+        (
+          canEditProfile(resource) &&
+
           (
-            isAdmin() || (
-              request.resource.data.createdByUid == resource.data.createdByUid &&
-              request.resource.data.editorIds == resource.data.editorIds
+            isAdmin()
+
+            ||
+
+            (
+              request.resource.data.createdByUid ==
+                resource.data.createdByUid &&
+
+              request.resource.data.editorIds ==
+                resource.data.editorIds
             )
-          ) && request.resource.data.lastEditedByUid == request.auth.uid)
+          ) &&
+
+          request.resource.data.lastEditedByUid ==
+            request.auth.uid
+        )
       );
 
+
+      // Only admins can delete profiles.
       allow delete: if isAdmin();
     }
 
-    // One-time first administrator bootstrap. The web app cannot read this document.
+
+    // ============================================================
+    // FIRST ADMINISTRATOR BOOTSTRAP
+    // ============================================================
+
     match /system/bootstrap {
+
+      // Never allow the client to read the bootstrap document.
       allow get, list: if false;
+
+      // Never allow the client to create it.
       allow create: if false;
+
+
+      // The first admin can disable bootstrap.
       allow update: if signedIn() &&
+
         resource.data.enabled == true &&
+
         request.resource.data.enabled == false &&
+
         request.resource.data.code == resource.data.code &&
-        getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+
+        getAfter(
+          /databases/$(database)/documents/users/$(request.auth.uid)
+        ).data.role == 'admin';
+
+
+      // Never allow deletion.
       allow delete: if false;
     }
   }
