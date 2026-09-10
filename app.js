@@ -494,22 +494,16 @@ async function boot() {
          * Login/register pages should never remain visible
          * after authentication succeeds.
          */
-       if (
-  (page === "login.html" || page === "register.html") &&
-  registrationInProgress
-) {
+       if (registrationInProgress) {
   return;
 }
 
-if (
-  page === "login.html" ||
-  page === "register.html"
-) {
+if (page === "login.html" || page === "register.html") {
   location.replace("index.html");
   return;
 }
 
-        try {
+try {
 
           /*
            * Load Firestore account first.
