@@ -4,7 +4,6 @@ import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signOut,
-  deleteUser,
   updateProfile
 } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
 import {
@@ -20,6 +19,7 @@ let currentUser=null;
 let currentAccount=null;
 let directoryUsers=[];
 let managingProfileId=null;
+let registrationInProgress = false;
 
 const $=id=>document.getElementById(id);
 const rankIndex=r=>{const i=RANKS.indexOf(r);return i<0?999:i};
@@ -52,56 +52,65 @@ function bindCards(){
 }
 function sorted(list,sort="rank"){const a=[...list];if(sort==="name")return a.sort((x,y)=>x.fullName.localeCompare(y.fullName));if(sort==="newest")return a.sort((x,y)=>(y.createdAtMs||0)-(x.createdAtMs||0));return a.sort((x,y)=>rankIndex(x.rank)-rankIndex(y.rank)||x.fullName.localeCompare(y.fullName))}
 
-async function loadAccount(){
+async function loadAccount() {
+  if (!currentUser?.uid) {
+    throw new Error("No authenticated user was found.");
+  }
+
   const userRef = doc(db, "users", currentUser.uid);
-  const snap = await getDoc(userRef);
 
-  /*
-   * Firebase Authentication is the source of truth for the user's
-   * identity. Firestore users/{UID} stores the directory account,
-   * Officer Name and role.
-   *
-   * If the Firestore document is missing, recreate it automatically.
-   * IMPORTANT: A missing Firestore document is always recreated as
-   * "user". Existing roles are NEVER changed by this function.
-   */
+  // Prevent the app from being stuck forever if Firestore does not respond.
+  const timeout = new Promise((_, reject) =>
+    setTimeout(
+      () => reject(new Error("Timed out while loading your directory account.")),
+      10000
+    )
+  );
 
-  if (!snap.exists()) {
-    const officerName =
-      currentUser.displayName ||
-      currentUser.email ||
-      "Unnamed Officer";
-
-    const email = currentUser.email || "";
-
-    await setDoc(userRef, {
-      officerName,
-      email,
-      role: "user",
-      createdAt: serverTimestamp()
-    });
-
-    currentAccount = {
-      officerName,
-      email,
-      role: "user"
-    };
-
-  } else {
+  const accountLoad = (async () => {
+    const snap = await getDoc(userRef);
 
     /*
-     * Existing Firestore account found.
-     * Keep its existing role exactly as it is.
+     * If the Firestore users/{uid} document does not exist,
+     * recreate it as a normal user.
+     *
+     * IMPORTANT:
+     * We do NOT change the role of an existing account.
      */
-    currentAccount = snap.data();
+    if (!snap.exists()) {
+
+      const officerName =
+        (currentUser.displayName || "").trim() ||
+        currentUser.email ||
+        "Unnamed Officer";
+
+      const email =
+        currentUser.email || "";
+
+      await setDoc(userRef, {
+        officerName,
+        email,
+        role: "user",
+        createdAt: serverTimestamp()
+      });
+
+      currentAccount = {
+        officerName,
+        email,
+        role: "user"
+      };
+
+      return;
+    }
 
     /*
-     * If Officer Name is missing or blank, try to restore it from
-     * Firebase Authentication without changing the user's role.
+     * Existing Firestore account.
      */
+    const data = snap.data();
+
     const existingOfficerName =
-      typeof currentAccount.officerName === "string"
-        ? currentAccount.officerName.trim()
+      typeof data.officerName === "string"
+        ? data.officerName.trim()
         : "";
 
     const authOfficerName =
@@ -109,49 +118,69 @@ async function loadAccount(){
         ? currentUser.displayName.trim()
         : "";
 
+    /*
+     * Officer Name priority:
+     *
+     * 1. Existing Firestore Officer Name
+     * 2. Firebase Authentication displayName
+     * 3. Firebase email
+     * 4. Fallback
+     *
+     * This prevents us from accidentally replacing an existing
+     * Officer Name with an email.
+     */
     const repairedOfficerName =
       existingOfficerName ||
       authOfficerName ||
       currentUser.email ||
       "Unnamed Officer";
 
+    /*
+     * Firebase Authentication email is the authoritative email.
+     */
+    const authEmail =
+      currentUser.email || "";
+
     const existingEmail =
-      typeof currentAccount.email === "string"
-        ? currentAccount.email.trim()
+      typeof data.email === "string"
+        ? data.email.trim()
         : "";
 
-    const repairedEmail =
-      existingEmail ||
-      currentUser.email ||
-      "";
+    /*
+     * Only repair fields that actually need repairing.
+     */
+    const updates = {};
+
+    if (repairedOfficerName !== existingOfficerName) {
+      updates.officerName = repairedOfficerName;
+    }
+
+    if (authEmail && authEmail !== existingEmail) {
+      updates.email = authEmail;
+    }
+
+    if (Object.keys(updates).length > 0) {
+      await updateDoc(userRef, updates);
+    }
 
     /*
-     * Only repair missing Officer Name/email.
-     * NEVER overwrite the existing role.
+     * IMPORTANT:
+     * Preserve the existing role.
      */
-    if (
-      repairedOfficerName !== existingOfficerName ||
-      repairedEmail !== existingEmail
-    ) {
-      await setDoc(
-        userRef,
-        {
-          officerName: repairedOfficerName,
-          email: repairedEmail
-        },
-        { merge: true }
-      );
+    currentAccount = {
+      ...data,
+      ...updates
+    };
+  })();
 
-      currentAccount = {
-        ...currentAccount,
-        officerName: repairedOfficerName,
-        email: repairedEmail
-      };
-    }
-  }
+  await Promise.race([
+    accountLoad,
+    timeout
+  ]);
 
   renderAccount();
 }
+
 async function saveEditorPermissions(){
  if(!isAdmin()||!managingProfileId)return;const status=$("editorsStatus");try{const editorIds=[...document.querySelectorAll("#editorList input:checked")].map(i=>i.value);await updateDoc(doc(db,"profiles",managingProfileId),{editorIds,lastEditedByUid:currentUser.uid,lastEditedByOfficerName:currentAccount.officerName,lastEditedAt:serverTimestamp()});const p=profiles.find(x=>x.id===managingProfileId);if(p)p.editorIds=editorIds;status.textContent="Editor permissions saved.";status.className="success";renderDashboard();renderGroup()}catch(e){status.textContent=e.message||"Could not save permissions.";status.className="error"}}
 
@@ -237,14 +266,15 @@ function setupDashboard(){
 }
 
 function setupLogin(){const f=$("loginForm");if(!f)return;f.onsubmit=async e=>{e.preventDefault();const status=$("loginStatus");try{await signInWithEmailAndPassword(auth,$("email").value.trim(),$("password").value);status.textContent="Signed in successfully.";status.className="success"}catch(err){status.textContent=err.message.replace("Firebase: ","");status.className="error"}}}
-function setupRegister(){
+function setupRegister() {
   const f = $("registerForm");
-  if(!f) return;
+  if (!f) return;
 
   f.onsubmit = async e => {
     e.preventDefault();
 
     const status = $("registerStatus");
+    
 
     const officerName = $("officerName").value.trim();
     const email = $("email").value.trim();
@@ -252,24 +282,19 @@ function setupRegister(){
     const confirmPassword = $("confirmPassword").value;
     const code = $("adminSetupCode").value.trim();
 
-    let credential = null;
-
-    /*
-     * Basic validation
-     */
-    if(password !== confirmPassword){
+    if (password !== confirmPassword) {
       status.textContent = "Passwords do not match.";
       status.className = "error";
       return;
     }
 
-    if(!officerName){
+    if (!officerName) {
       status.textContent = "Officer Name is required.";
       status.className = "error";
       return;
     }
 
-    if(!email){
+    if (!email) {
       status.textContent = "Email is required.";
       status.className = "error";
       return;
@@ -277,25 +302,25 @@ function setupRegister(){
 
     try {
 
+      registrationInProgress = true;
+
       /*
        * STEP 1
-       * Create the Firebase Authentication account.
+       * Create Firebase Authentication account.
        */
-      credential = await createUserWithEmailAndPassword(
-        auth,
-        email,
-        password
-      );
+      const credential =
+        await createUserWithEmailAndPassword(
+          auth,
+          email,
+          password
+        );
 
       const user = credential.user;
       const uid = user.uid;
 
       /*
        * STEP 2
-       * Store Officer Name in Firebase Authentication too.
-       *
-       * This gives us a recovery source if the Firestore users/{UID}
-       * document is ever accidentally deleted.
+       * Store Officer Name in Firebase Authentication.
        */
       await updateProfile(user, {
         displayName: officerName
@@ -303,15 +328,14 @@ function setupRegister(){
 
       /*
        * STEP 3
-       * Create the matching Firestore users/{UID} document.
+       * Create matching Firestore users/{uid} document.
        */
       const userRef = doc(db, "users", uid);
 
       /*
-       * If an Admin Bootstrap Code was supplied, use the existing
-       * administrator bootstrap process.
+       * ADMIN REGISTRATION
        */
-      if(code){
+      if (code) {
 
         const batch = writeBatch(db);
 
@@ -333,8 +357,7 @@ function setupRegister(){
         await batch.commit();
 
         /*
-         * Remove the temporary bootstrap code from the user's
-         * Firestore document after successful setup.
+         * Remove temporary setup code.
          */
         await updateDoc(userRef, {
           adminSetupCode: deleteField()
@@ -343,7 +366,7 @@ function setupRegister(){
       } else {
 
         /*
-         * Normal account.
+         * NORMAL USER REGISTRATION
          */
         await setDoc(userRef, {
           officerName,
@@ -354,37 +377,45 @@ function setupRegister(){
       }
 
       /*
-       * Registration succeeded.
+       * Update local account immediately.
        */
+      currentUser = user;
+
+      currentAccount = {
+        officerName,
+        email,
+        role: code ? "admin" : "user"
+      };
+
+      renderAccount();
+
       status.textContent = "Account created successfully.";
       status.className = "success";
 
       /*
-       * Give Firebase a moment to finish the auth state change,
-       * then send the new user to the directory.
+       * Firebase has already authenticated the user.
+       * Send them to the directory.
        */
-      setTimeout(() => {
-        location.href = "index.html";
-      }, 500);
+      registrationInProgress = false;
 
-    } catch(err) {
+setTimeout(() => {
+  location.replace("index.html");
+}, 500);
+
+    } catch (err) {
+
+  registrationInProgress = false;
 
       /*
-       * If Firestore setup failed after Authentication succeeded,
-       * remove the newly-created Authentication account so we don't
-       * leave an orphaned login account behind.
+       * IMPORTANT:
+       *
+       * DO NOT call deleteUser() here.
+       *
+       * If Firestore fails after Authentication succeeds,
+       * deleting the Auth account makes troubleshooting much
+       * harder and can make it appear registration never worked.
        */
-      if(credential?.user){
-
-        try{
-          await deleteUser(credential.user);
-        }catch(_){
-          /*
-           * Ignore cleanup failure here.
-           * The original registration error is more important.
-           */
-        }
-      }
+      console.error("Registration error:", err);
 
       status.textContent =
         err.message?.replace("Firebase: ", "") ||
@@ -398,5 +429,170 @@ function setupPWA(){
   if("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(()=>{});
 }
 
-async function boot(){setupPWA();nav();setupLogin();setupRegister();setupLogout();setupDashboard();onAuthStateChanged(auth,async user=>{const page=location.pathname.split("/").pop()||"index.html";const privatePages=["index.html","group.html","profile.html",""];if(user){currentUser=user;if(page==="login.html"||page==="register.html"){location.replace("index.html");return;}try{await loadAccount();if(page==="profile.html"){await setupProfileDetail();}else{await loadProfiles();if(isAdmin()&&$("showUsersButton"))$("showUsersButton").hidden=false;renderDashboard();renderGroup();}}catch(e){const msg=$("status")||$("backupStatus")||$("registerStatus");if(msg){msg.textContent="Could not load directory account: "+e.message;msg.className="error"}}}else if(privatePages.includes(page)){location.href="login.html"}})}
-document.addEventListener("DOMContentLoaded",boot);
+function finishLoading() {
+
+  /*
+   * Support common loading element IDs used by the app.
+   */
+  const ids = [
+    "loadingScreen",
+    "loadingOverlay",
+    "appLoading",
+    "loader",
+    "loading"
+  ];
+
+  ids.forEach(id => {
+    const el = $(id);
+
+    if (el) {
+      el.hidden = true;
+      el.style.display = "none";
+    }
+  });
+
+  /*
+   * Also remove common loading classes from the body.
+   */
+  document.body.classList.remove(
+    "loading",
+    "is-loading",
+    "app-loading"
+  );
+}
+async function boot() {
+
+  try {
+
+    setupPWA();
+    nav();
+    setupLogin();
+    setupRegister();
+    setupLogout();
+    setupDashboard();
+
+    onAuthStateChanged(auth, async user => {
+
+      const page =
+        location.pathname.split("/").pop() || "index.html";
+
+      const privatePages = [
+        "index.html",
+        "group.html",
+        "profile.html",
+        ""
+      ];
+
+      /*
+       * USER IS LOGGED IN
+       */
+      if (user) {
+
+        currentUser = user;
+
+        /*
+         * Login/register pages should never remain visible
+         * after authentication succeeds.
+         */
+        if (
+  (page === "login.html" || page === "register.html") &&
+  !registrationInProgress
+) {
+  location.replace("index.html");
+  return;
+}
+
+        try {
+
+          /*
+           * Load Firestore account first.
+           */
+          await loadAccount();
+
+          /*
+           * Profile detail page.
+           */
+          if (page === "profile.html") {
+
+            await setupProfileDetail();
+
+          } else {
+
+            /*
+             * Directory pages.
+             */
+            await loadProfiles();
+
+            /*
+             * Show User Management only to administrators.
+             */
+            if (
+              isAdmin() &&
+              $("showUsersButton")
+            ) {
+              $("showUsersButton").hidden = false;
+            }
+
+            renderDashboard();
+            renderGroup();
+          }
+
+          /*
+           * Loading is finished successfully.
+           */
+          finishLoading();
+
+        } catch (e) {
+
+          console.error(
+            "Directory boot error:",
+            e
+          );
+
+          const msg =
+            $("status") ||
+            $("backupStatus") ||
+            $("registerStatus");
+
+          if (msg) {
+            msg.textContent =
+              "Could not load directory account: " +
+              (e.message || "Unknown error");
+
+            msg.className = "error";
+          }
+
+          /*
+           * VERY IMPORTANT:
+           * Don't leave the user staring at Loading forever.
+           */
+          finishLoading();
+        }
+
+      } else {
+
+        /*
+         * USER IS NOT LOGGED IN.
+         */
+        currentUser = null;
+        currentAccount = null;
+
+        if (privatePages.includes(page)) {
+          location.replace("login.html");
+          return;
+        }
+
+        finishLoading();
+      }
+    });
+
+  } catch (e) {
+
+    console.error(
+      "Application boot error:",
+      e
+    );
+
+    finishLoading();
+  }
+}document.addEventListener("DOMContentLoaded",boot);
