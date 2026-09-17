@@ -350,3 +350,49 @@ async function morningAction(action,button){
  await loadMorning();
 }
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&morningData&&$('#modal').open)void loadMorning();});
+
+
+'use strict';
+const reliability=(op,payload={})=>call('reliability',{op,payload});
+const R={page:1,mode:'sessions',area:null,items:[]};
+async function reliabilityList(mode=R.mode,page=1){
+ const epoch=S.epoch;R.mode=mode;R.page=page;
+ const result=await reliability(mode,{page,...(R.area&&mode==='span_list'?{area_id:R.area}:{})});
+ if(epoch!==S.epoch||!S.session)return;
+ R.items=result.items||[];
+ const title={sessions:'Devices & sessions',archive:'Archived profiles',history:'Change history',span_list:'Span of Control'}[mode];
+ modal(title,`${mode==='span_list'?'<p>Assignments are explicitly recorded. No supervisor is inferred from Function / Role.</p>'+btn('Assign person','span-edit'):''}${R.items.map(x=>mode==='sessions'?sessionCard(x):`<section class="tile"><strong>${esc(x.name||x.officer||x.actor||'Session')}</strong><p>${esc(x.reference||x.device||x.action||'')}</p>${mode==='sessions'?`<small>${esc(x.created_at)} ${x.current?'· This session':''}</small>${btn('Revoke access','rel-revoke',`data-id="${esc(x.id)}" data-current="${!!x.current}"`)}`:mode==='archive'?`<p>Archived ${esc(x.deleted_at)} · ${esc(x.approval_state)}</p>${btn('Restore','rel-restore',`data-id="${esc(x.id)}" data-version="${x.version}"`)}`:mode==='history'?`<p>${esc(x.time)} · ${esc(x.target)}</p><details><summary>Changed fields</summary><pre class="notes">${esc(JSON.stringify(x.details,null,2))}</pre></details>`:`<p>${esc(x.role||'Role not recorded')} · ${x.supervisor? 'Supervisor: '+esc(x.supervisor):'Unassigned supervisor'}</p><p>Reviewed ${esc(x.reviewed_at)} · ${esc(x.source)}</p>${btn('Edit','span-edit',`data-id="${esc(x.id)}"`)}${btn('Remove assignment','span-remove',`data-id="${esc(x.id)}" data-version="${x.version}"`)}`}</section>`).join('')||'<p>No entries.</p>'}`,`${btn('Previous','rel-page',`data-page="${page-1}" ${page<=1?'disabled':''}`)}<span>Page ${page}</span>${btn('Next','rel-page',`data-page="${page+1}" ${R.items.length<50?'disabled':''}`)}`);
+}
+async function verificationForm(){const p=S.selected;if(!p)return;const v=await reliability('verification',{id:p.id});if(!S.session||S.selected?.id!==p.id)return;modal('Record verification',`<p>${esc(p.name)}</p><p>Last reviewed: ${esc(v.reviewed_at||'Never')} · Officer ${esc(v.officer||'Not recorded')}</p>${canEdit(p)?`<form data-form="verification">${formError()}${field('Review status',select('status',['Unverified','Reported','Confirmed','Needs review'],v.status||'Unverified'))}${field('Source / reference',input('source',v.source||'','text','required maxlength="500"'))}<button type="submit">Save review</button></form>`:`<p>${esc(v.status||'Unverified')}</p><p>${esc(v.source||'No source recorded')}</p>`}`);}
+async function spanForm(id,candidate){const x=R.items.find(x=>x.id===id)||candidate;modal('Span of Control assignment',`<p>Use the profile ID shown in its details. Leave supervisor blank when no reporting relationship is confirmed.</p><form data-form="span-assignment">${formError()}${field('Find a person',input('person_query','','search','placeholder="Name or alias"'))}${btn('Search profiles','span-search')}<div id="span-candidates"></div>${x?`<p>Selected: ${esc(x.name)}</p>`:''}${field('Person ID',input('id',x?.id,'text',`required ${x?'readonly':''}`))}${field('Supervisor',`<select name="supervisor_id">${option('','Unassigned',x?.supervisor_id)}${R.items.filter(p=>p.id!==id).map(p=>option(p.id,p.name,x?.supervisor_id)).join('')}</select>`)}${field('Source / reference',input('source',x?.source,'text','required maxlength="500"'))}${input('version',x?.version||0,'hidden')}<button type="submit">Save assignment</button></form>`);}
+document.addEventListener('click',async e=>{const b=e.target.closest('[data-action]');if(!b||b.disabled)return;const a=b.dataset.action;if(!['rel-sessions','rel-history','rel-archive','rel-revoke','rel-restore','rel-page','verification','rel-span','span-edit','span-remove','about','export-profile','check-duplicates','span-search','span-choose'].includes(a))return;b.disabled=true;try{
+ if(a==='span-search'){const q=$('[name=person_query]').value.trim();if(q.length<3)throw Error('Enter at least three characters');const result=await rpc('records',{q,page_size:20});const el=$('#span-candidates');if(el)el.innerHTML=result.items.map(p=>btn(esc(p.name)+' · '+esc(p.reference),'span-choose',`data-id="${esc(p.id)}" data-name="${esc(p.name)}"`)).join('')||'<p>No matches.</p>';}
+ else if(a==='span-choose')await spanForm(b.dataset.id,{id:b.dataset.id,name:b.dataset.name,version:0});
+ else if(a==='check-duplicates'){const p=S.selected;const r=await reliability('duplicates',{id:p.id,name:p.name,alias:p.alias,dob:p.dob});modal('Possible duplicate profiles',r.items.map(x=>`<p>${esc(x.name)} · ${esc(x.reference)} · ${esc(x.dob)}</p>`).join('')||'<p>No matches found. This does not establish a unique identity.</p>');}
+ else if(a==='export-profile'){if(!admin())return;const r=await call('exportProfile',{id:S.selected.id});if(r.saved)toast('Profile summary downloaded');}
+ else if(a==='rel-sessions')await reliabilityList('sessions');
+ else if(a==='rel-history')await reliabilityList('history');
+ else if(a==='rel-archive')await reliabilityList('archive');
+ else if(a==='rel-page')await reliabilityList(R.mode,Number(b.dataset.page));
+ else if(a==='verification')await verificationForm();
+ else if(a==='rel-span'){R.area=G.area.id;await reliabilityList('span_list');}
+ else if(a==='span-edit')await spanForm(b.dataset.id);
+ else if(a==='span-remove'){if(confirm('Remove this assignment?')){await reliability('span_remove',{area_id:R.area,id:b.dataset.id,version:Number(b.dataset.version)});await reliabilityList();}}
+ else if(a==='rel-revoke'){if(confirm(`Sign out ${R.items.find(x=>x.id===b.dataset.id)?.user_name||'this user'} on ${R.items.find(x=>x.id===b.dataset.id)?.device_name||'this device'}? They will need to sign in again.`)){await reliability('session_revoke',{id:b.dataset.id});if(b.dataset.current==='true')await call('logout');else await reliabilityList();}}
+ else if(a==='rel-restore'){if(confirm('Restore this profile? Its previous approval status will be retained.')){await reliability('restore',{id:b.dataset.id,version:Number(b.dataset.version)});await reliabilityList();}}
+ else if(a==='about'){const info=await call('buildInfo');modal('About Rogues Gallery™',`<p>Windows ${esc(info.version)}</p><p>Build source date: ${esc(info.buildDate)}</p><p>${esc(info.notes)}</p><p>${info.update?.version?'Available: Windows '+esc(info.update.version)+' · '+esc(info.update.channel):esc(info.update?.message||'Update status unavailable')}</p><p>${esc(info.update?.notes||'')}</p>`);}
+}catch(err){toast(err.message);}finally{b.disabled=false;}});
+document.addEventListener('submit',async e=>{const f=e.target;if(!['verification','span-assignment'].includes(f.dataset.form))return;e.preventDefault();const button=f.querySelector('button[type=submit]');if(f.dataset.saving)return;f.dataset.saving='true';button.disabled=true;const b=Object.fromEntries(new FormData(f));try{if(f.dataset.form==='verification'){await reliability('verify',{...b,id:S.selected.id,version:S.selected.version});await openProfile(S.selected.id);}else{await reliability('span_save',{...b,version:Number(b.version),area_id:R.area});await reliabilityList('span_list');}}catch(err){errorIn(f,err);}finally{delete f.dataset.saving;button.disabled=false;}});
+
+function sessionDate(value){
+ if(!value||!Number.isFinite(Date.parse(value)))return 'Not available';
+ return new Intl.DateTimeFormat('en-GB',{timeZone:'America/Port_of_Spain',day:'2-digit',month:'2-digit',year:'numeric',hour:'numeric',minute:'2-digit',hour12:true}).format(new Date(value))+' (T&T)';
+}
+function sessionCard(x){return `<section class="tile"><h3>${esc(x.device_name||'Device details unavailable')}</h3>
+ ${x.current?'<p class="badge">This device · current sign-in</p>':''}
+ <p>User: ${esc(x.user_name||'Name unavailable')}</p>
+ ${x.officer?`<p>Regimental number: ${esc(x.officer)}</p>`:''}
+ ${x.user_role?`<p>Role: ${esc(x.user_role)}</p>`:''}
+ <p>App version: ${esc(x.app_version||'Not available')}</p>
+ <p>Signed in: ${esc(sessionDate(x.created_at))}</p><p>Session refreshed: ${esc(sessionDate(x.updated_at))}</p>
+ ${btn(x.current?'Sign out here':'Sign out this device','rel-revoke',`data-id="${esc(x.id)}" data-current="${!!x.current}"`)}</section>`;}
