@@ -234,12 +234,7 @@ let lastActivity=0;for(const name of ['pointerdown','keydown','wheel'])document.
 setInterval(async()=>{if(S.session&&!document.hidden)try{await rpc('session');S.photos.clear();const options=await rpc('shoe_settings');const renamed=options.label!==S.shoe.label;S.shoe=options;if(renamed&&!$('#modal').open)void render();}catch(e){if(e.status!==401&&e.status!==403){const sync=$('.sync span');if(sync)sync.textContent='Unable to check server access · '+syncText();}}},30000);
 setInterval(()=>{if(S.session&&!document.hidden&&!$('#modal').open&&['home','search','saved'].includes(S.view))void render();},300000);
 try{const theme=localStorage.getItem('iatf.desktop.theme');if(['White','Black','Camo'].includes(theme))document.body.dataset.theme=theme;}catch{}
-$('#app').innerHTML='<section class="startup-screen" role="status"><img src="startup-chrome.png" alt="Rogues Gallery™. By Police, For Police."></section>';
-const startupImage=document.querySelector('.startup-screen img');
-let startupTimerStarted=false;
-function beginStartupDelay(){if(startupTimerStarted)return;startupTimerStarted=true;setTimeout(()=>{if(document.querySelector('.startup-screen'))login();},2000);}
-startupImage.addEventListener('load',beginStartupDelay,{once:true});
-if(startupImage.complete&&startupImage.naturalWidth>0)beginStartupDelay();
+login();
 
 function closePhotoViewer(){const d=$('#photo-viewer');if(d){d.close();d.innerHTML='';}}
 function enlargePhoto(src){const d=$('#photo-viewer');d.innerHTML=`<div class="dialog-head"><h2>Photograph</h2>${btn('Close','photo-close')}</div><div class="photo-viewport"><img src="${src}" alt="Enlarged profile photograph"></div><div class="dialog-foot">${btn('−','photo-out','aria-label="Zoom out"')}${btn('Reset','photo-reset')}${btn('+','photo-in','aria-label="Zoom in"')}</div>`;d.dataset.zoom='1';d.showModal();}
