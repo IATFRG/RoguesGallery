@@ -1,599 +1,398 @@
-import { auth, db } from "./firebase-config.js";
-import {
-  onAuthStateChanged,
-  createUserWithEmailAndPassword,
-  signInWithEmailAndPassword,
-  signOut,
-  updateProfile
-} from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
-import {
-  collection, doc, getDocs, getDoc, setDoc, updateDoc, deleteDoc,
-  serverTimestamp, writeBatch, deleteField
-} from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
-
-const RANKS=["Gang Leader","Sub Leader","Enforcer","Shooter","Soldier","Runner","Associate"];
-const GANGS=["Sixx Gang","Unruly Gang","7Seven Gang","Alien Gang","1800 Gang","Muslim City/9 Gang","Rasta City Gang"];
-const CAUTIONS=["Firearm Offender","Drug Offender","Violent","Breaker","Sexual Offender","Murderer"];
-let profiles=[];
-let currentUser=null;
-let currentAccount=null;
-let directoryUsers=[];
-let managingProfileId=null;
-let registrationInProgress = false;
-
-const $=id=>document.getElementById(id);
-const rankIndex=r=>{const i=RANKS.indexOf(r);return i<0?999:i};
-const esc=v=>{const d=document.createElement("div");d.textContent=v??"";return d.innerHTML};
-const formatDate=v=>v?new Date(v+"T00:00:00").toLocaleDateString(undefined,{day:"2-digit",month:"short",year:"numeric"}):"";
-const profileCollection=()=>collection(db,"profiles");
-const canEdit=p=>currentAccount&&(currentAccount.role==="admin"||p.createdByUid===currentUser.uid||(p.editorIds||[]).includes(currentUser.uid));
-const isAdmin=()=>currentAccount?.role==="admin";
-
-function nav(){const c=$("gangNavigation");if(!c)return;const current=new URLSearchParams(location.search).get("gang");c.innerHTML=GANGS.map(g=>`<a class="nav-item gang-link ${current===g?"active":""}" href="group.html?gang=${encodeURIComponent(g)}">${esc(g)}</a>`).join("");const menu=c.closest(".gang-menu");if(menu&&current)menu.open=true}
-function renderAccount(){if($("officerDisplay"))$("officerDisplay").textContent=currentAccount?.officerName||currentUser?.email||"";if($("roleDisplay"))$("roleDisplay").textContent=(currentAccount?.role||"user").toUpperCase()}
-
-function card(p){
- const img=p.photo?`<img class="profile-image" src="${p.photo}" alt="Photo of ${esc(p.fullName)}">`:`<div class="profile-image" aria-label="No profile photo"></div>`;
- const actions=[];
- if(canEdit(p)) actions.push(`<button class="primary-button edit-profile" data-id="${p.id}" type="button" title="Edit profile" aria-label="Edit profile">✎</button>`);
- if(isAdmin()) actions.push(`<button class="secondary-button editors-profile icon-only-button" data-id="${p.id}" type="button" title="Manage editor permissions" aria-label="Manage editor permissions">⚿</button><button class="danger-button delete-profile icon-only-button" data-id="${p.id}" type="button" title="Delete profile" aria-label="Delete profile">🗑</button>`);
- const audit=p.createdByOfficerName?`<p class="audit-line">Added by ${esc(p.createdByOfficerName)}${p.lastEditedByOfficerName?` · Edited by ${esc(p.lastEditedByOfficerName)}`:""}</p>`:"";
- return `<article class="profile-card profile-card-clickable" data-profile-id="${p.id}" tabindex="0" role="button" aria-label="Open profile for ${esc(p.fullName)}"><div class="card-top"><div class="card-photo-wrap">${img}</div><span class="rank-badge">${esc(p.rank)}</span></div><h3>${esc(p.fullName)}</h3><p>▣ D.O.B: ${esc(formatDate(p.dob))}</p><p>♙ Rank: ${esc(p.rank)}</p><p>♛ Gang: ${esc(p.gang)}</p>${audit}${actions.length?`<div class="card-actions">${actions.join("")}</div>`:""}</article>`;
+'use strict';
+const $=s=>document.querySelector(s),esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const paths={home:'M3 10 12 3l9 7M5 9v12h5v-7h4v7h5V9',search:'M21 21l-5-5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0',saved:'M6 3h12v19l-6-4-6 4z',settings:'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8M12 2v3m0 14v3M2 12h3m14 0h3M5 5l2 2m10 10 2 2M5 19l2-2M17 7l2-2',plus:'M12 5v14M5 12h14',refresh:'M20 7V3l-3 3a8 8 0 1 0 3 10M20 3h-5',user:'M12 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8M4 22v-3a8 8 0 0 1 16 0v3',out:'M9 3H3v18h6M14 8l5 4-5 4M8 12h11',back:'M15 4l-8 8 8 8',close:'M5 5l14 14M19 5 5 19',shield:'M12 2 3 6v6c0 5 9 10 9 10s9-5 9-10V6zM8 12l3 3 5-6',photo:'M3 4h18v16H3zM3 17l5-5 4 4 3-3 6 6M16 8h.01',edit:'M16 3l5 5-12 12H4v-5zM14 5l5 5',flag:'M5 22V3h14l-3 5 3 5H5',list:'M8 5h13M8 12h13M8 19h13M3 5h.01M3 12h.01M3 19h.01'};
+const icon=name=>`<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${paths[name]||paths.list}"/></svg>`;
+const btn=(text,action,extra='',cls='')=>`<button type="button" data-action="${action}" ${extra} class="${cls}">${text}</button>`;
+const cautions=['Murder','Sexual offender','Drug offender','Traffic offender','Robbery offender','Violent','Wanted','Firearm Offender','Malicious Damage','Assault'];
+const flags=['Outstanding Warrant','Dangerous','Wounded','Killed','Released from Prison','Other'];
+const S={session:null,view:'home',page:1,filters:{},gangs:['No Affiliation','Six','Seven','1800s','ABG','Others'],roles:[],shoe:{label:'Area From',options:[]},config:{},epoch:0,photos:new Map(),selected:null,lastSync:null,busy:false};
+let modalRequest=0,renderSequence=0,photoPaint=0,toastTimer,loginMfa=false,cropImage=null,cropSlot=null,draft=null;
+const admin=()=>S.session?.member?.role==='admin';
+const canEdit=p=>['admin','editor'].includes(S.session?.member?.role);
+const values=v=>Array.isArray(v)?v:typeof v==='string'&&v?[v]:[];
+const age=dob=>{if(!/^\d{4}-\d{2}-\d{2}$/.test(dob||''))return '';const d=new Date(dob+'T12:00:00'),n=new Date();return n.getFullYear()-d.getFullYear()-(n.getMonth()<d.getMonth()||(n.getMonth()===d.getMonth()&&n.getDate()<d.getDate())?1:0);};
+const option=(v,label=v,selected='')=>`<option value="${esc(v)}" ${v===selected?'selected':''}>${esc(label)}</option>`;
+const select=(name,opts,value='',empty='Not recorded')=>`<select name="${name}">${option('',empty,value)}${[...new Set([...opts,...(value?[value]:[])])].map(v=>option(v,v,value)).join('')}</select>`;
+const field=(label,control,full=false)=>`<label class="field ${full?'full':''}"><span>${label}</span>${control}</label>`;
+const input=(name,value='',type='text',more='')=>`<input name="${name}" value="${esc(value)}" type="${type}" ${more}>`;
+function toast(text){clearTimeout(toastTimer);$('#toast').textContent=text;$('#toast').classList.add('visible');toastTimer=setTimeout(()=>$('#toast').classList.remove('visible'),5000);}
+function errorIn(target,error){const el=target.querySelector('.form-error');if(el){el.textContent=error.message||error;el.hidden=false;}else toast(error.message||error);}
+function reset(reason=''){if(typeof R!=='undefined'){R.items=[];R.area=null;}closePhotoViewer();S.epoch++;renderSequence++;S.session=null;G.gang=null;G.area=null;G.items=[];G.span=false;S.photos.clear();S.selected=null;S.lastSync=null;S.filters={};S.page=1;loginMfa=false;cropImage=null;closeModal(true);login(reason);}
+window.iatf.onLock(reason=>{if(reason)reset(reason);});
+async function call(action,payload={}){const epoch=S.epoch;const r=await window.iatf.call(action,payload);if(epoch!==S.epoch&&action!=='logout')throw Error('Session changed. Please try again.');if(!r.ok)throw Object.assign(Error(r.error||'Request failed'),{status:r.status,creationMayExist:r.creationMayExist});return r.data;}
+const rpc=(op,payload={})=>call('rpc',{op,payload});
+// Touch navigation is confined to top-level menus, never forms or modal content.
+const mainMenuOrder=['home','poi','gnet','eforms','settings'];
+let menuSwipe=null;
+const menuPointers=new Set();
+document.addEventListener('pointerdown',e=>{
+ if(e.pointerType!=='touch')return;
+ menuPointers.add(e.pointerId);
+ if(menuPointers.size!==1){menuSwipe=null;return;}
+ if(!S.session||!mainMenuOrder.includes(S.view)||document.querySelector('dialog[open]')||
+    !e.target.closest('#content')||e.target.closest('input,textarea,select,button,a,[contenteditable],canvas,img')||
+    document.activeElement?.matches('input,textarea,select,[contenteditable]')){menuSwipe=null;return;}
+ menuSwipe={id:e.pointerId,x:e.clientX,y:e.clientY,view:S.view,epoch:S.epoch};
+});
+document.addEventListener('pointercancel',e=>{menuPointers.delete(e.pointerId);menuSwipe=null;});
+document.addEventListener('pointerup',e=>{
+ menuPointers.delete(e.pointerId);
+ const swipe=menuSwipe;menuSwipe=null;
+ if(!swipe||e.pointerId!==swipe.id||S.epoch!==swipe.epoch||S.view!==swipe.view||
+    document.querySelector('dialog[open]')||window.getSelection()?.toString())return;
+ const dx=e.clientX-swipe.x,dy=e.clientY-swipe.y;
+ if(Math.abs(dx)<72||Math.abs(dx)<Math.abs(dy)*2)return;
+ const next=mainMenuOrder.indexOf(S.view)+(dx<0?1:-1);
+ if(next<0||next>=mainMenuOrder.length)return;
+ const button=document.querySelector(`nav [data-action="nav"][data-view="${mainMenuOrder[next]}"]`);
+ if(button)void action(button).catch(e=>toast(e.message));
+});
+const account=(op,payload={})=>call('account',{op,payload});
+function formError(){return '<div class="error form-error" role="alert" hidden></div>';}
+function login(notice=''){
+ $('#app').innerHTML=`<section class="login"><img class="crest" src="logo.png" alt="Trinidad and Tobago Police Service"><p class="brandline">TRINIDAD AND TOBAGO POLICE SERVICE</p><p class="unitline">Inter-Agency Task Force</p><h1>Rogues Gallery™</h1>${notice?`<div class="notice">${esc(notice)}</div>`:''}<form data-form="login">${formError()}${loginMfa?field('Authenticator code',input('code','','text','required inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code"')):field('Regimental number / Administrator email',input('identifier','','text','required maxlength="254" autocomplete="username"'))+field('Password',input('password','','password','required maxlength="256" autocomplete="current-password"'))}<button class="primary" type="submit">${icon('shield')}${loginMfa?'Verify and sign in':'Sign in'}</button></form><div class="links">${loginMfa?btn('Back to sign in','cancel-mfa','', 'plain'):btn('First time? Register','register','','plain')+btn('Request password reset','reset-request','','plain')+btn('Complete approved reset','reset-complete','','plain')}</div><p class="muted" style="font-size:14px;margin-top:30px">Authorized personnel only. Access is recorded.</p><small>Web preview</small></section>`;
+ $('#app input')?.focus();
 }
-function bindCards(){
- document.querySelectorAll(".profile-card-clickable").forEach(c=>{
-   const open=()=>{const id=c.dataset.profileId;if(id)location.href=`profile.html?id=${encodeURIComponent(id)}`};
-   c.addEventListener("click",e=>{if(e.target.closest("button,a,input,select,textarea"))return;open()});
-   c.addEventListener("keydown",e=>{if((e.key==="Enter"||e.key===" ")&&!e.target.closest("button,input,select,textarea")){e.preventDefault();open()}});
- });
- document.querySelectorAll(".edit-profile").forEach(b=>b.onclick=e=>{e.stopPropagation();editProfile(b.dataset.id)});
- document.querySelectorAll(".delete-profile").forEach(b=>b.onclick=e=>{e.stopPropagation();deleteProfile(b.dataset.id)});
- document.querySelectorAll(".editors-profile").forEach(b=>b.onclick=e=>{e.stopPropagation();openEditorPermissions(b.dataset.id)});
+function shell(){
+ const name=S.session.user?.displayName||S.session.member.service_number||'Account';
+ $('#app').innerHTML=`<header class="header"><img src="logo.png" alt="TTPS crest"><div class="brand"><strong>IATF · Rogues Gallery™</strong><small>Trinidad and Tobago Police Service</small></div><div class="account"><small>${esc(name)}</small><span class="badge">${esc(admin()?'Administrator':S.session.member.role)}</span>${btn(icon('out'),'logout','aria-label="Sign out" title="Sign out"','icon-only')}</div></header><div class="layout"><nav aria-label="Main navigation">${[['home','Home'],['poi','P.O.I.'],['gnet','G-Net'],['eforms','E-Forms'],['settings','Settings']].map(([key,label])=>btn(icon(key==='poi'?'user':key)+`<span>${label}</span>`,'nav',`data-view="${key}"`,(key===S.view||(key==='poi'&&['search','card-approvals','saved'].includes(S.view))||(key==='eforms'&&S.view==='fi-form'))?'active':'')).join('')}<div class="nav-foot">Inter-Agency Task Force<br>Web preview</div></nav><main id="content"></main></div>`;
 }
-function sorted(list,sort="rank"){const a=[...list];if(sort==="name")return a.sort((x,y)=>x.fullName.localeCompare(y.fullName));if(sort==="newest")return a.sort((x,y)=>(y.createdAtMs||0)-(x.createdAtMs||0));return a.sort((x,y)=>rankIndex(x.rank)-rankIndex(y.rank)||x.fullName.localeCompare(y.fullName))}
-
-async function loadAccount() {
-  if (!currentUser?.uid) {
-    throw new Error("No authenticated user was found.");
-  }
-
-  const userRef = doc(db, "users", currentUser.uid);
-
-  // Prevent the app from being stuck forever if Firestore does not respond.
-  const timeout = new Promise((_, reject) =>
-    setTimeout(
-      () => reject(new Error("Timed out while loading your directory account.")),
-      10000
-    )
-  );
-
-  const accountLoad = (async () => {
-    const snap = await getDoc(userRef);
-
-    /*
-     * If the Firestore users/{uid} document does not exist,
-     * recreate it as a normal user.
-     *
-     * IMPORTANT:
-     * We do NOT change the role of an existing account.
-     */
-    if (!snap.exists()) {
-
-      const officerName =
-        (currentUser.displayName || "").trim() ||
-        currentUser.email ||
-        "Unnamed Officer";
-
-      const email =
-        currentUser.email || "";
-
-      await setDoc(userRef, {
-        officerName,
-        email,
-        role: "user",
-        createdAt: serverTimestamp()
-      });
-
-      currentAccount = {
-        officerName,
-        email,
-        role: "user"
-      };
-
-      return;
-    }
-
-    /*
-     * Existing Firestore account.
-     */
-    const data = snap.data();
-
-    const existingOfficerName =
-      typeof data.officerName === "string"
-        ? data.officerName.trim()
-        : "";
-
-    const authOfficerName =
-      typeof currentUser.displayName === "string"
-        ? currentUser.displayName.trim()
-        : "";
-
-    /*
-     * Officer Name priority:
-     *
-     * 1. Existing Firestore Officer Name
-     * 2. Firebase Authentication displayName
-     * 3. Firebase email
-     * 4. Fallback
-     *
-     * This prevents us from accidentally replacing an existing
-     * Officer Name with an email.
-     */
-    const repairedOfficerName =
-      existingOfficerName ||
-      authOfficerName ||
-      currentUser.email ||
-      "Unnamed Officer";
-
-    /*
-     * Firebase Authentication email is the authoritative email.
-     */
-    const authEmail =
-      currentUser.email || "";
-
-    const existingEmail =
-      typeof data.email === "string"
-        ? data.email.trim()
-        : "";
-
-    /*
-     * Only repair fields that actually need repairing.
-     */
-    const updates = {};
-
-    if (repairedOfficerName !== existingOfficerName) {
-      updates.officerName = repairedOfficerName;
-    }
-
-    if (authEmail && authEmail !== existingEmail) {
-      updates.email = authEmail;
-    }
-
-    if (Object.keys(updates).length > 0) {
-      await updateDoc(userRef, updates);
-    }
-
-    /*
-     * IMPORTANT:
-     * Preserve the existing role.
-     */
-    currentAccount = {
-      ...data,
-      ...updates
-    };
-  })();
-
-  await Promise.race([
-    accountLoad,
-    timeout
-  ]);
-
-  renderAccount();
-}
-
-async function saveEditorPermissions(){
- if(!isAdmin()||!managingProfileId)return;const status=$("editorsStatus");try{const editorIds=[...document.querySelectorAll("#editorList input:checked")].map(i=>i.value);await updateDoc(doc(db,"profiles",managingProfileId),{editorIds,lastEditedByUid:currentUser.uid,lastEditedByOfficerName:currentAccount.officerName,lastEditedAt:serverTimestamp()});const p=profiles.find(x=>x.id===managingProfileId);if(p)p.editorIds=editorIds;status.textContent="Editor permissions saved.";status.className="success";renderDashboard();renderGroup()}catch(e){status.textContent=e.message||"Could not save permissions.";status.className="error"}}
-
-async function renderUsers(){if(!isAdmin()||!$("usersList"))return;await loadUsers();$("usersList").innerHTML=directoryUsers.map(u=>`<div class="user-row"><div><strong>${esc(u.officerName||"Unnamed Officer")}</strong><small>${esc(u.email||"")}</small></div><select class="role-select" data-id="${u.id}"><option value="user" ${u.role==="user"?"selected":""}>User</option><option value="editor" ${u.role==="editor"?"selected":""}>Editor</option><option value="admin" ${u.role==="admin"?"selected":""}>Administrator</option></select></div>`).join("");document.querySelectorAll(".role-select").forEach(s=>s.onchange=()=>changeRole(s.dataset.id,s.value));}
-async function changeRole(uid,roleValue){const status=$("usersStatus");try{await updateDoc(doc(db,"users",uid),{role:roleValue,adminSetupCode:deleteField()});const u=directoryUsers.find(x=>x.id===uid);if(u)u.role=roleValue;status.textContent="User role updated.";status.className="success";if(uid===currentUser.uid){currentAccount.role=roleValue;renderAccount()}}catch(e){status.textContent=e.message||"Could not update role.";status.className="error"}}
-
-async function saveProfileDetails(id){
- const p=profiles.find(x=>x.id===id);if(!p||!currentUser||!currentAccount)return;
- const cautions=[...document.querySelectorAll("#detailCautions input:checked")].map(i=>i.value);
- const notes=$("detailNotes")?.value.slice(0,255)||"";
- const status=$("detailStatus");
+async function enter(session){S.session=session;S.view='home';shell();if(session.member.email_required){adminEmail();return;}const epoch=S.epoch;await morningReport(true);if(epoch!==S.epoch||!S.session)return;await loadOptions();await render();}
+async function loadOptions(){const results=await Promise.allSettled([rpc('gangs'),rpc('roles'),rpc('config'),rpc('shoe_settings')]);if(results[0].status==='fulfilled')S.gangs=results[0].value;if(results[1].status==='fulfilled')S.roles=results[1].value;if(results[2].status==='fulfilled')S.config=results[2].value;if(results[3].status==='fulfilled')S.shoe=results[3].value;}
+function syncText(){return S.lastSync?'Profiles last synced '+S.lastSync.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}):'Profiles have not synced in this session';}
+async function render(){
+ if(!S.session)return;
+ const sequence=++renderSequence;document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('active',b.dataset.view===S.view||(b.dataset.view==='poi'&&['search','card-approvals','saved'].includes(S.view))||(b.dataset.view==='eforms'&&S.view==='fi-form')||(b.dataset.view==='settings'&&['general','display','administration','user-management'].includes(S.view))));
+ const main=$('#content');main.innerHTML=loadingCards();
  try{
-   if(status){status.textContent="Saving changes...";status.className="";}
-   await updateDoc(doc(db,"profiles",id),{cautions,notes,lastEditedByUid:currentUser.uid,lastEditedByOfficerName:currentAccount.officerName,lastEditedAt:serverTimestamp()});
-   p.cautions=cautions;p.notes=notes;p.lastEditedByUid=currentUser.uid;p.lastEditedByOfficerName=currentAccount.officerName;
-   renderProfileDetail(p,false);
-   if(status){status.textContent="Profile updated successfully.";status.className="success";}
- }catch(e){if(status){status.textContent=e.message||"Could not save profile.";status.className="error";}}
-}
-function openProfilePhoto(p){
- if(!p?.photo)return;
- let modal=$("profilePhotoModal");
- if(!modal){
-   modal=document.createElement("div");
-   modal.id="profilePhotoModal";
-   modal.className="profile-photo-modal";
-   modal.innerHTML=`<div class="profile-photo-backdrop" data-close-photo></div><div class="profile-photo-dialog" role="dialog" aria-modal="true" aria-label="Enlarged profile photo"><button type="button" class="profile-photo-close" aria-label="Close enlarged photo" data-close-photo>×</button><img id="profilePhotoLarge" class="profile-photo-large" alt=""><div id="profilePhotoWatermark" class="profile-photo-watermark"></div></div>`;
-   document.body.appendChild(modal);
-   modal.querySelectorAll("[data-close-photo]").forEach(el=>el.addEventListener("click",closeProfilePhoto));
- }
- const image=$("profilePhotoLarge"),watermark=$("profilePhotoWatermark");
- image.src=p.photo;image.alt=`Photo of ${p.fullName||"profile"}`;
- watermark.textContent=p.fullName||"";
- modal.hidden=false;document.body.classList.add("photo-modal-open");
- document.addEventListener("keydown",handlePhotoModalKey);
-}
-function closeProfilePhoto(){const modal=$("profilePhotoModal");if(!modal)return;modal.hidden=true;document.body.classList.remove("photo-modal-open");document.removeEventListener("keydown",handlePhotoModalKey);}
-function handlePhotoModalKey(e){if(e.key==="Escape")closeProfilePhoto();}
-function renderProfileDetail(p,editing=false){
- const photo=$("detailPhoto");if(photo){if(p.photo){photo.src=p.photo;photo.hidden=false;photo.onclick=()=>openProfilePhoto(p);photo.setAttribute("role","button");photo.setAttribute("tabindex","0");photo.setAttribute("aria-label",`Enlarge photo of ${p.fullName||"profile"}`);photo.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();openProfilePhoto(p);}};}else{photo.removeAttribute("src");photo.hidden=true;photo.onclick=null;photo.removeAttribute("role");photo.removeAttribute("tabindex");}}
- if($("detailName"))$("detailName").textContent=p.fullName||"";
- if($("detailRank"))$("detailRank").textContent=p.rank||"";
- if($("detailDob"))$("detailDob").textContent=`D.O.B: ${formatDate(p.dob)}`;if($("detailAddress"))$("detailAddress").textContent=p.address?`Address: ${p.address}`:"Address: Not provided";
- if($("detailGang"))$("detailGang").textContent=p.gang||"";
- const selected=new Set(p.cautions||[]);
- const box=$("detailCautions");if(box)box.innerHTML=CAUTIONS.map(c=>`<label class="caution-row"><input type="checkbox" value="${esc(c)}" ${selected.has(c)?"checked":""} ${editing?"":"disabled"}><span>${esc(c)}</span></label>`).join("");
- const notes=$("detailNotes");if(notes){notes.value=p.notes||"";notes.readOnly=!editing;notes.maxLength=255;}
- const counter=$("notesCounter");if(counter)counter.textContent=`${(p.notes||"").length} / 255`;
- const editBtn=$("detailEditButton"),saveBtn=$("detailSaveButton"),cancelBtn=$("detailCancelButton");
- if(editBtn){editBtn.hidden=editing||!currentUser;editBtn.onclick=()=>renderProfileDetail(p,true);}
- if(saveBtn){saveBtn.hidden=!editing;saveBtn.onclick=()=>saveProfileDetails(p.id);}
- if(cancelBtn){cancelBtn.hidden=!editing;cancelBtn.onclick=()=>renderProfileDetail(p,false);}
- const del=$("detailDeleteButton");if(del){del.hidden=!isAdmin();del.onclick=()=>deleteProfileFromDetail(p.id);}
- const perm=$("detailPermissionsButton");if(perm){perm.hidden=!isAdmin();perm.onclick=()=>openEditorPermissionsFromDetail(p);}
- if(notes)notes.oninput=()=>{if(counter)counter.textContent=`${notes.value.length} / 255`;};
- const editPhotoNote=$("detailEditHint");if(editPhotoNote)editPhotoNote.hidden=!editing;
-}
-async function deleteProfileFromDetail(id){const p=profiles.find(x=>x.id===id);if(!p||!isAdmin()||!confirm(`Delete ${p.fullName}? This cannot be undone.`))return;try{await deleteDoc(doc(db,"profiles",id));location.href="index.html";}catch(e){const s=$("detailStatus");if(s){s.textContent=e.message;s.className="error";}}}
-async function openEditorPermissionsFromDetail(p){if(!isAdmin())return;await openEditorPermissions(p.id);}
-async function setupProfileDetail(){
- const id=new URLSearchParams(location.search).get("id");if(!id)return;
- await loadProfiles();const p=profiles.find(x=>x.id===id);if(!p){if($("detailStatus"))$("detailStatus").textContent="Profile not found.";return;}
- if($("backButton"))$("backButton").onclick=()=>history.length>1?history.back():(location.href="index.html");
- if($("detailPermissionsButton"))$("detailPermissionsButton").hidden=!isAdmin();
- renderProfileDetail(p,new URLSearchParams(location.search).get("edit")==="1"&&canEdit(p));
-}
-
-function setupLogout(){const b=$("logoutButton");if(b)b.onclick=async()=>{await signOut(auth);location.href="login.html"};}
-
-function setupDashboard(){
- const form=$("profileForm");if(!form)return;
- $("showAddProfile").onclick=()=>{resetForm();$("profileFormPanel").hidden=false;$("profileFormPanel").scrollIntoView({behavior:"smooth"})};$("closeFormButton").onclick=()=>$("profileFormPanel").hidden=true;$("cancelEditButton").onclick=resetForm;
- $("showUsersButton")?.addEventListener("click",async()=>{await renderUsers();$("userManagementPanel").hidden=false;$("userManagementPanel").scrollIntoView({behavior:"smooth"})});
- const photoInput=$("photo"),cameraInput=$("cameraPhoto"),chooseInput=$("choosePhoto");
- const usePhoto=file=>{if(!file)return;const dt=new DataTransfer();dt.items.add(file);photoInput.files=dt.files;const r=new FileReader();r.onload=()=>{if($("photoPreview")){$("photoPreview").src=r.result;$("photoPreview").hidden=false;}if($("photoFileName"))$("photoFileName").textContent=file.name||"Picture selected";};r.readAsDataURL(file);};
- cameraInput?.addEventListener("change",()=>usePhoto(cameraInput.files[0]));chooseInput?.addEventListener("change",()=>usePhoto(chooseInput.files[0]));photoInput?.addEventListener("change",()=>usePhoto(photoInput.files[0]));
- $("takePhotoButton")?.addEventListener("click",()=>cameraInput?.click());
- $("choosePhotoButton")?.addEventListener("click",()=>chooseInput?.click());$("closeUsersButton")?.addEventListener("click",()=>$("userManagementPanel").hidden=true);$("closeEditorsButton")?.addEventListener("click",()=>$("editorPanel").hidden=true);$("saveEditorsButton")?.addEventListener("click",saveEditorPermissions);
- form.onsubmit=async e=>{e.preventDefault();const id=$("editingId").value||crypto.randomUUID();const old=profiles.find(x=>x.id===id);if(old&&!canEdit(old))return;let photo=old?.photo||"";const file=$("photo").files[0];const status=$("status");try{status.textContent="Saving profile...";status.className="";if(file)photo=await compressImage(file);const p={fullName:$("fullName").value.trim(),dob:$("dob").value,address:$("address").value.trim(),rank:$("rank").value,gang:$("gang").value,photo,cautions:old?.cautions||[],notes:old?.notes||"",createdAtMs:old?.createdAtMs||Date.now(),createdByUid:old?.createdByUid||currentUser.uid,createdByOfficerName:old?.createdByOfficerName||currentAccount.officerName,editorIds:old?.editorIds||[],lastEditedByUid:currentUser.uid,lastEditedByOfficerName:currentAccount.officerName,lastEditedAt:serverTimestamp()};await setDoc(doc(db,"profiles",id),p,{merge:true});const saved={id,...p};const i=profiles.findIndex(x=>x.id===id);if(i>=0)profiles[i]=saved;else profiles.push(saved);status.textContent=i>=0?"Profile updated successfully.":"Profile added successfully.";status.className="success";resetForm();renderDashboard()}catch(err){status.textContent=err.message||"Could not save profile.";status.className="error"}};
- ["searchInput","filterRank","sortSelect"].forEach(id=>$(id)?.addEventListener("input",renderDashboard));$("filterRank")?.addEventListener("change",renderDashboard);$("sortSelect")?.addEventListener("change",renderDashboard);
- $("exportButton").onclick=()=>{const blob=new Blob([JSON.stringify(profiles,null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="rogue-gallery-backup.json";a.click();URL.revokeObjectURL(a.href)};
- $("importInput").onchange=async e=>{const status=$("backupStatus");try{const data=JSON.parse(await e.target.files[0].text());if(!Array.isArray(data))throw new Error("Invalid backup file.");for(const raw of data){const id=crypto.randomUUID();const p={fullName:raw.fullName||"",dob:raw.dob||"",address:raw.address||"",rank:raw.rank||"Associate",gang:raw.gang||GANGS[0],photo:raw.photo||"",cautions:Array.isArray(raw.cautions)?raw.cautions:[],notes:typeof raw.notes==="string"?raw.notes.slice(0,255):"",createdAtMs:Date.now(),createdByUid:currentUser.uid,createdByOfficerName:currentAccount.officerName,editorIds:[],lastEditedByUid:currentUser.uid,lastEditedByOfficerName:currentAccount.officerName,lastEditedAt:serverTimestamp()};await setDoc(doc(db,"profiles",id),p)}await loadProfiles();renderDashboard();status.textContent="Backup imported successfully.";status.className="success"}catch(err){status.textContent=err.message||"Could not import this backup.";status.className="error"}finally{e.target.value=""}};
-}
-
-function setupLogin(){const f=$("loginForm");if(!f)return;f.onsubmit=async e=>{e.preventDefault();const status=$("loginStatus");try{await signInWithEmailAndPassword(auth,$("email").value.trim(),$("password").value);status.textContent="Signed in successfully.";status.className="success"}catch(err){status.textContent=err.message.replace("Firebase: ","");status.className="error"}}}
-function setupRegister() {
-  const f = $("registerForm");
-  if (!f) return;
-
-  f.onsubmit = async e => {
-    e.preventDefault();
-
-    const status = $("registerStatus");
-    
-
-    const officerName = $("officerName").value.trim();
-    const email = $("email").value.trim();
-    const password = $("password").value;
-    const confirmPassword = $("confirmPassword").value;
-    const code = $("adminSetupCode").value.trim();
-
-    if (password !== confirmPassword) {
-      status.textContent = "Passwords do not match.";
-      status.className = "error";
-      return;
-    }
-
-    if (!officerName) {
-      status.textContent = "Officer Name is required.";
-      status.className = "error";
-      return;
-    }
-
-    if (!email) {
-      status.textContent = "Email is required.";
-      status.className = "error";
-      return;
-    }
-
-    try {
-
-      registrationInProgress = true;
-
-      /*
-       * STEP 1
-       * Create Firebase Authentication account.
-       */
-      const credential =
-        await createUserWithEmailAndPassword(
-          auth,
-          email,
-          password
-        );
-
-      const user = credential.user;
-      const uid = user.uid;
-
-      /*
-       * STEP 2
-       * Store Officer Name in Firebase Authentication.
-       */
-      await updateProfile(user, {
-        displayName: officerName
-      });
-
-      /*
-       * STEP 3
-       * Create matching Firestore users/{uid} document.
-       */
-      const userRef = doc(db, "users", uid);
-
-      /*
-       * ADMIN REGISTRATION
-       */
-      if (code) {
-
-        const batch = writeBatch(db);
-
-        batch.set(userRef, {
-          officerName,
-          email,
-          role: "admin",
-          adminSetupCode: code,
-          createdAt: serverTimestamp()
-        });
-
-        batch.update(
-          doc(db, "system", "bootstrap"),
-          {
-            enabled: false
-          }
-        );
-
-        await batch.commit();
-
-        /*
-         * Remove temporary setup code.
-         */
-        await updateDoc(userRef, {
-          adminSetupCode: deleteField()
-        });
-
-      } else {
-
-        /*
-         * NORMAL USER REGISTRATION
-         */
-        await setDoc(userRef, {
-          officerName,
-          email,
-          role: "user",
-          createdAt: serverTimestamp()
-        });
-      }
-
-      /*
-       * Update local account immediately.
-       */
-      currentUser = user;
-
-      currentAccount = {
-        officerName,
-        email,
-        role: code ? "admin" : "user"
-      };
-
-      renderAccount();
-
-      status.textContent = "Account created successfully.";
-      status.className = "success";
-
-      /*
-       * Firebase has already authenticated the user.
-       * Send them to the directory.
-       */
-      registrationInProgress = false;
-
-setTimeout(() => {
-  location.replace("index.html");
-}, 500);
-
-    } catch (err) {
-
-  registrationInProgress = false;
-
-      /*
-       * IMPORTANT:
-       *
-       * DO NOT call deleteUser() here.
-       *
-       * If Firestore fails after Authentication succeeds,
-       * deleting the Auth account makes troubleshooting much
-       * harder and can make it appear registration never worked.
-       */
-      console.error("Registration error:", err);
-
-      status.textContent =
-        err.message?.replace("Firebase: ", "") ||
-        "Could not create account.";
-
-      status.className = "error";
-    }
-  };
-}
-function setupPWA(){
-  if("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(()=>{});
-}
-
-function finishLoading() {
-
-  /*
-   * Support common loading element IDs used by the app.
-   */
-  const ids = [
-    "loadingScreen",
-    "loadingOverlay",
-    "appLoading",
-    "loader",
-    "loading"
-  ];
-
-  ids.forEach(id => {
-    const el = $(id);
-
-    if (el) {
-      el.hidden = true;
-      el.style.display = "none";
-    }
-  });
-
-  /*
-   * Also remove common loading classes from the body.
-   */
-  document.body.classList.remove(
-    "loading",
-    "is-loading",
-    "app-loading"
-  );
-}
-async function boot() {
-
-  try {
-
-    setupPWA();
-    nav();
-    setupLogin();
-    setupRegister();
-    setupLogout();
-    setupDashboard();
-
-    onAuthStateChanged(auth, async user => {
-
-      const page =
-        location.pathname.split("/").pop() || "index.html";
-
-      const privatePages = [
-        "index.html",
-        "group.html",
-        "profile.html",
-        ""
-      ];
-
-      /*
-       * USER IS LOGGED IN
-       */
-      if (user) {
-
-        currentUser = user;
-
-        /*
-         * Login/register pages should never remain visible
-         * after authentication succeeds.
-         */
-       if (registrationInProgress) {
-  return;
-}
-
-if (page === "login.html" || page === "register.html") {
-  location.replace("index.html");
-  return;
-}
-
-try {
-
-          /*
-           * Load Firestore account first.
-           */
-          await loadAccount();
-
-          /*
-           * Profile detail page.
-           */
-          if (page === "profile.html") {
-
-            await setupProfileDetail();
-
-          } else {
-
-            /*
-             * Directory pages.
-             */
-            await loadProfiles();
-
-            /*
-             * Show User Management only to administrators.
-             */
-            if (
-              isAdmin() &&
-              $("showUsersButton")
-            ) {
-              $("showUsersButton").hidden = false;
-            }
-
-            renderDashboard();
-            renderGroup();
-          }
-
-          /*
-           * Loading is finished successfully.
-           */
-          finishLoading();
-
-        } catch (e) {
-
-          console.error(
-            "Directory boot error:",
-            e
-          );
-
-          const msg =
-            $("status") ||
-            $("backupStatus") ||
-            $("registerStatus");
-
-          if (msg) {
-            msg.textContent =
-              "Could not load directory account: " +
-              (e.message || "Unknown error");
-
-            msg.className = "error";
-          }
-
-          /*
-           * VERY IMPORTANT:
-           * Don't leave the user staring at Loading forever.
-           */
-          finishLoading();
-        }
-
-      } else {
-
-        /*
-         * USER IS NOT LOGGED IN.
-         */
-        currentUser = null;
-        currentAccount = null;
-
-        if (privatePages.includes(page)) {
-          location.replace("login.html");
-          return;
-        }
-
-        finishLoading();
-      }
-    });
-
-  } catch (e) {
-
-    console.error(
-      "Application boot error:",
-      e
-    );
-
-    finishLoading();
+  await loadOptions();if(sequence!==renderSequence||!S.session)return;
+  if(S.view==='poi'){main.innerHTML=`<h1>P.O.I.</h1>${btn(icon('search')+'Search','nav','data-view="search"')}${['admin','editor'].includes(S.session.member.role)?btn(icon('list')+'Card Approvals','nav','data-view="card-approvals"'):''}${btn(icon('saved')+'Saved','nav','data-view="saved"')}`;return;}
+  if(S.view==='eforms'||S.view==='fi-form'){
+   if(!admin()){main.innerHTML=comingSoon('E-Forms');return;}
+   main.innerHTML=S.view==='eforms'?`<h1>E-Forms</h1>${btn(icon('list')+'FI Form','nav','data-view="fi-form"')}`:`${btn('Back to E-Forms','nav','data-view="eforms"')}${comingSoon('FI Form')}`;return;
   }
-}document.addEventListener("DOMContentLoaded",boot);
+  if(S.view==='card-approvals'){const result=await rpc('card_approvals',{page:S.page});if(sequence!==renderSequence)return;main.innerHTML=`<h1>Card Approvals</h1><p>${result.total} pending cards</p>${result.items.map(p=>`<article class="person"><h2>${esc(p.name)}</h2><p>Submitted by ${esc(p.submitted_by_number)} ${esc(p.submitted_by_name)}</p>${btn('View Card','open',`data-id="${p.id}"`)}${btn('Edit Card','review-edit',`data-id="${p.id}"`)}${btn('Approve Card','review-approve',`data-id="${p.id}" data-version="${p.version}"`)}${btn('Delete Card','review-delete',`data-id="${p.id}" data-version="${p.version}"`,'danger')}</article>`).join('')}${btn('Previous','page',`data-page="${S.page-1}" ${S.page<=1?'disabled':''}`)}${btn('Next','page',`data-page="${S.page+1}" ${S.page*24>=result.total?'disabled':''}`)}`;return;}
+  if(S.view==='notifications'){const result=await rpc('flag_notifications',{page:S.page});if(sequence!==renderSequence||!S.session)return;main.innerHTML=`<div class="section-head"><h1>Notifications</h1>${btn('Refresh','refresh')}</div>${result.items.map(e=>`<article class="tile"><h3>Profile Card Flagged</h3><p>${esc(e.profile_name)} flagged as ${esc(e.flag)} by ${esc([e.service_number,e.actor_name].filter(Boolean).join(' '))}</p><small>${esc(new Date(e.created_at).toLocaleString())}</small>${btn('Open profile','open',`data-id="${esc(e.record_id)}"`)}</article>`).join('')||'<p>No flag notifications.</p>'}${btn('Previous','page',`data-page="${S.page-1}" ${S.page<=1?'disabled':''}`)}${btn('Next','page',`data-page="${S.page+1}" ${S.page*24>=result.total?'disabled':''}`)}`;return;}
+  if(S.view==='requests'){await accountApprovals(main,sequence);return;}
+  if(S.view==='gnet'){await renderGnet(main,sequence);return;}
+  if(S.view==='settings'){settings(main);return;}
+  if(S.view==='general'){main.innerHTML=`<h1>General</h1>${btn('Back to Settings','nav','data-view="settings"')}${btn('Display','nav','data-view="display"')}`;return;}
+  if(S.view==='display'){main.innerHTML=`<h1>Display</h1>${btn('Back to General','nav','data-view="general"')}<section class="tile full"><h3>Display</h3><small>Choose your background.</small><div class="theme-options">${['White','Black','Camo'].map(t=>btn(t,'theme',`data-theme="${t}"`,(document.body.dataset.theme||'White')===t?'active':'')).join('')}</div></section>`;return;}
+  if(['administration','user-management'].includes(S.view)&&!admin()){main.innerHTML='<p>Administrator permission required.</p>';return;}
+  if(S.view==='administration'){main.innerHTML=`<h1>Administration & security</h1>${btn('Back to Settings','nav','data-view="settings"')}${btn('User Management','nav','data-view="user-management"')}`;return;}
+  if(S.view==='user-management'){main.innerHTML=`<h1>User Management</h1>${btn('Back to Administration & security','nav','data-view="administration"')}${btn('Devices & sessions','rel-sessions')}`;return;}
+
+  if(S.view==='home'||S.view==='search'||S.view==='saved'){
+   const filters={...S.filters,...(S.view==='home'?{page_size:6}:{}),page:S.page,...(S.view==='saved'?{saved:'1'}:{})};
+   const paint=result=>{if(sequence!==renderSequence||!S.session)return;
+   const home=S.view==='home',search=S.view==='search';
+   main.innerHTML=`${home?`<div class="morning-home-action">${btn(icon('list')+'Morning Report Board','morning-report','','morning-home-button')}</div>`:''}<div class="section-head"><div><h1>${home?'Home':search?'Search':'Saved profiles'}</h1>${home?`${btn(`${result.total} authorized profiles`,'nav','data-view="search"','plain')}`:''}</div>${btn('Notifications','nav','data-view="notifications"')}${btn(icon('refresh')+'Refresh','refresh')}</div><div class="sync">${icon('refresh')}<span>${result.cached?(result.checking?'Downloaded cards · checking for updates…':'Downloaded cards · connection unavailable · may be out of date'):syncText()}</span></div>${home?`<div class="shortcuts">${btn(`<span class="circle">${icon('plus')}</span><span>Add Person</span>`,'add','','shortcut')}${btn(`<span class="circle">${icon('search')}</span><span>Search</span>`,'nav','data-view="search"','shortcut')}${btn(`<span class="circle">${icon('saved')}</span><span>Saved profiles</span>`,'nav','data-view="saved"','shortcut')}</div><h2>Recently Updated</h2>`:''}${search?searchForm():''}<div class="grid" id="cards">${result.items.length?result.items.map(card).join(''):`<div class="empty">${icon(home?'user':S.view)}<h3>${S.view==='saved'?'No saved profiles':search?'No matching profiles':'No profiles yet'}</h3><p>${S.view==='saved'?'Save a profile to find it here.':search?'Try another name, alias, area or filter.':'Use Add Person to create a profile.'}</p></div>`}</div>${!home?`<div class="pagination">${btn('Previous','page',`data-page="${S.page-1}" ${S.page<=1?'disabled':''}`)}<span>Page ${S.page} · ${result.total} profiles</span>${btn('Next','page',`data-page="${S.page+1}" ${S.page*(result.page_size||24)>=result.total?'disabled':''}`)}</div>`:''}`;
+   void cardPhotos(result.items,sequence,++photoPaint);};
+   const cached=await call('cachePage',filters).catch(()=>null);if(cached?.items?.length)paint({...cached,checking:true});
+   try{const result=await rpc('records',filters);if(sequence!==renderSequence||!S.session)return;S.lastSync=new Date();paint(result);}catch(e){if(e.status!==503||!cached?.items?.length)throw e;paint(cached);}return;
+
+  }
+  await renderAdmin(main,sequence);
+ }catch(error){if(sequence===renderSequence&&S.session)main.innerHTML=`<div class="section-head"><h1>${esc(S.view)}</h1>${btn('Back','nav','data-view="settings"')}</div><div class="error">${esc(error.message)}</div>${btn(icon('refresh')+'Try again','refresh')}<p class="muted" style="margin-top:16px">${syncText()}</p>`;}
+}
+function searchForm(){return `<form data-form="search" class="search-panel"><div class="searchbar">${input('q',S.filters.q,'search','placeholder="Name, alias or area" aria-label="Search name, alias or area" maxlength="200"')}<button type="submit" class="primary">${icon('search')}Search</button></div><div class="filters">${field('Sex',select('sex',['Male','Female','Other'],S.filters.sex,'All'))}${field('Gang',select('gang',S.gangs,S.filters.gang,'All'))}${field('Function / Role',select('function_role',S.roles.map(r=>r.name),S.filters.function_role,'All'))}${field(esc(S.shoe.label),select('shoe_size',S.shoe.options,S.filters.shoe_size,'All'))}${field('Caution',select('caution',cautions,S.filters.caution,'All'))}</div>${btn('Clear filters','clear-filters','','plain')}</form>`;}
+function card(p){const d=p.data||{},c=values(d.caution),showRole=!['no affiliation','no gang affiliation'].includes((d.gang_affiliation||'').toLowerCase());return `<article class="person"><div class="person-main"><div class="avatar placeholder" data-photo="${esc(p.id)}">${icon('user')}</div><div class="details"><h3>${esc(p.name)}</h3>${p.alias?`<p class="muted">${esc(p.alias)}</p>`:''}<p><b>D.O.B.</b> ${esc(p.dob||'Not recorded')}</p><p><b>Address</b> ${esc(d.address||'Not recorded')}</p><p><b>Gang</b> ${esc(d.gang_affiliation||'Not recorded')}</p>${showRole&&d.function_role?`<p><b>Function / Role</b> ${esc(d.function_role)}</p>`:''}<p><b>${esc(S.shoe.label)}</b> ${esc(d.shoe_size||'Not recorded')}</p>${c.length?`<p class="caution">${esc(c.join(' · '))}</p>`:''}${p.flag?`<p class="caution">${esc(p.flag==='Other'?p.flag_note:p.flag)}</p>`:''}</div></div><div class="actions">${btn('Open profile','open',`data-id="${p.id}"`)}${btn(icon('saved')+(p.saved?'Unsave':'Save'),'save',`data-id="${p.id}" data-saved="${!!p.saved}"`,'plain')}</div></article>`;}
+async function photo(p,slot){const key=p.id+':'+p.version+':'+slot;if(S.photos.has(key))return S.photos.get(key);const data=await call('photo',{id:p.id,slot});S.photos.set(key,data);return data;}
+async function cardPhotos(items,sequence,paint){for(const p of items){if(!(p.photos?.length||p.photo))continue;try{const src=await photo(p,0);if(sequence!==renderSequence||paint!==photoPaint)return;const el=document.querySelector(`[data-photo="${p.id}"]`);if(el)el.outerHTML=`<button type="button" class="photo-open" data-action="enlarge-photo" aria-label="Enlarge photograph of ${esc(p.name)}"><img class="avatar" src="${src}" alt="Display photograph of ${esc(p.name)}"></button>`;}catch{/* A failed photo does not remove the authorized profile. */}}}
+function modal(title,body,foot=''){const m=$('#modal');m.classList.toggle('morning-report-dialog',title==='Morning Report Board');m.innerHTML=`<div class="dialog-head"><h2 id="modal-title">${title}</h2>${btn(icon('close'),'close','aria-label="Close"','icon-only')}</div><div class="dialog-body">${body}</div>${foot?`<div class="dialog-foot">${foot}</div>`:''}`;if(!m.open)m.showModal();}
+function closeModal(force=false){if(!force&&$('#modal form[data-submitting="true"]'))return false;if(!force&&$('#modal form[data-dirty="true"]')&&!confirm('Discard your unsaved changes?'))return false;clearTimeout(morningTimer);const finished=morningFinished;morningFinished=null;morningData=null;finished?.();modalRequest++;$('#modal').close();$('#modal').innerHTML='';cropImage=null;draft=null;return true;}
+function registration(){modal('Register',`<p class="muted">Your account must be approved by an administrator before you can sign in.</p><form data-form="register">${formError()}${field('Full name',input('full_name','','text','required minlength="2" maxlength="160"'))}${field('Regimental number',input('service_number','','text','required pattern="[0-9]{1,12}" inputmode="numeric"'))}${field('Password',input('password','','password','required minlength="8" maxlength="256" autocomplete="new-password"'))}<button class="primary" type="submit">Submit registration</button></form>`);}
+function resetForm(complete){modal(complete?'Complete approved reset':'Request password reset',`<form data-form="${complete?'reset_complete':'reset_request'}">${formError()}${field('Regimental number',input('service_number','','text','required pattern="[0-9]{1,12}" inputmode="numeric"'))}${complete?field('Administrator-issued recovery code',input('code','','text','required maxlength="64"'))+field('New password',input('password','','password','required minlength="8" maxlength="256" autocomplete="new-password"')):'<p class="muted">An administrator will review your request.</p>'}<button class="primary" type="submit">${complete?'Change password':'Request reset'}</button></form>`);}
+function adminEmail(){modal('Administrator email',`<p>Add your administrator sign-in email before continuing.</p><form data-form="admin-email">${formError()}${field('Email',input('email','','email','required maxlength="254"'))}<button class="primary" type="submit">Save email</button></form>`);}
+function profileNotes(data){const entries=data.note_entries;if(!Array.isArray(entries))return data.notes||'No notes recorded.';return [data.notes?'Legacy notes\n'+data.notes:'',...entries.map(n=>n.body+' — '+n.created_at+' — '+n.author)].filter(Boolean).join('\n\n')||'No notes recorded.';}
+async function openProfile(id){const request=++modalRequest;modal('Person profile',loadingCards());const p=await rpc('record',{id});if(request!==modalRequest||!$('#modal').open)return;S.selected=p;const d=p.data||{},showRole=!['no affiliation','no gang affiliation'].includes((d.gang_affiliation||'').toLowerCase());
+ modal('Person profile',`<div class="section-head"><div class="profile-identity"><h1>${esc(p.name)}${age(p.dob)!==''?`, ${esc(age(p.dob))}`:''}</h1><div class="profile-alias-flag"><span class="profile-alias">${esc((p.alias||'').trim()||'No Alias')}</span>${btn(icon('flag'),'flag','aria-label="Flag profile" title="Flag profile"')}<span class="caution">${esc(p.flag?(p.flag==='Other'?(p.flag_note||'Other'):p.flag):'')}</span></div></div><span class="badge">${esc(p.classification)}</span></div>${!(p.photos||[]).length?'<div class="profile-photo-placeholder">'+icon('user')+'<span>No photograph added</span></div>':''}<div class="photo-grid">${(p.photos||[]).map((_,i)=>`<div><div class="avatar placeholder" style="width:100%;height:220px" data-detail-photo="${i}">${icon('photo')}</div><small>${i===0?'Display picture':`Photograph ${i+1}`}</small>${canEdit(p)?`<div class="photo-controls">${btn('Crop','crop',`data-slot="${i}"`)}${btn('Delete photo','delete-photo',`data-slot="${i}"`,'danger')}</div>`:''}</div>`).join('')}</div>${canEdit(p)&&(p.photos?.length||0)<3?`<div class="photo-upload">${field('Add photograph (PNG / JPEG, up to 5 MB)', '<input type="file" id="photo-file" accept="image/png,image/jpeg">')}${btn(icon('plus')+'Upload photo','upload-photo')}<small style="display:block;margin-top:10px">${p.photos?.length?'Up to three photographs per profile.':'First photo becomes the display picture. Use a clear face photo.'}</small></div>`:''}<section class="profile-details-card"><h3>Personal Details</h3><div class="profile-summary">${[['',p.dob||'N/A'],['Sex',d.sex?.toLowerCase()==='other'?'other: '+(d.sex_other||'Not recorded'):d.sex],['',(d.address||'').trim()||'No Address Available'],['Gang Affiliation',d.gang_affiliation],...(showRole?[['Function / Role',d.function_role]]:[])].map(([label,value])=>`<div class="${['Gang Affiliation','Function / Role'].includes(label)?'profile-affiliation':''}">${label?`<small>${esc(label)}</small>`:''}<p>${esc(value||'Not recorded')}</p></div>`).join('')}<div class="full"><small>Caution</small><p class="caution">${esc(values(d.caution).join(' · ')||'Not recorded')}</p></div>${p.flag?`<div class="full"><small>Flag</small><p class="caution">${esc(p.flag==='Other'?p.flag_note:p.flag)}</p></div>`:''}<details class="full physical-details"><summary>Physical Description &amp; Distinguishing Marks</summary><h3>Physical Description</h3><p class="notes">${esc(p.description||'Not recorded')}</p><h3>Distinguishing Marks</h3><p class="notes">${esc(d.marks||'Not recorded')}</p></details></div></section><section class="profile-details-card profile-area"><h3>Area From</h3><p>${esc(d.shoe_size||'Not recorded')}</p></section><p class="muted">${admin()?`Person ID: ${esc(p.id)} · `:''}Review: ${esc(p.verification?.status||"Unverified")} · Last verified: ${esc(p.verification?.verified_at||"Never")}</p><section class="tile"><h3>Notes</h3>${canEdit(p)?`<details class="note-composer"><summary>Add a new note</summary><form data-form="dated-note">${formError()}${field('Note', '<textarea name="note" required maxlength="500"></textarea>')}<button type="submit" class="primary">Add dated note</button></form></details>`:''}<details class="note-history"><summary>Note History</summary><p class="notes">${esc(profileNotes(d))}</p></details></section><div class="actions profile-actions">${btn("Verification","verification")}${admin()?btn("Download summary","export-profile"):""}${btn("Check duplicates","check-duplicates")}${btn(icon('saved')+(p.saved?'Unsave':'Save'),'save',`data-id="${p.id}" data-saved="${!!p.saved}" data-detail="true"`)}${canEdit(p)?btn(icon('edit')+'Edit profile','edit'):''}${admin()?btn('Delete profile','delete-profile','','danger'):''}</div>`);
+ const epoch=S.epoch;for(let i=0;i<(p.photos?.length||0);i++){try{const src=await photo(p,i);if(epoch!==S.epoch||S.selected?.id!==id)return;const el=$(`[data-detail-photo="${i}"]`);if(el)el.outerHTML=`<button type="button" class="photo-open" data-action="enlarge-photo" aria-label="Enlarge photograph"><img src="${src}" alt="${i===0?'Display photograph':'Photograph '+(i+1)} of ${esc(p.name)}"></button>`;}catch{const el=$(`[data-detail-photo="${i}"]`);if(el)el.textContent='Photograph unavailable';}}
+}
+function updateSexFields(){const f=document.querySelector('[data-form="person"]');if(!f)return;const other=f.elements.sex.value==='other';const field=f.querySelector('#sex-other-field');field.hidden=!other;f.elements.sex_other.required=other;f.elements.sex_other.disabled=!other;}
+document.addEventListener('change',e=>{if(e.target.name==='sex')updateSexFields();if(e.target.name==='shoe_size'){const adding=e.target.selectedOptions[0]?.dataset.newArea==='true',field=$('#new-area-field'),input=field.querySelector('input');field.hidden=!adding;input.disabled=!adding;input.required=adding;if(!adding)input.value='';}});
+function appendDraftNote(){const f=$('form[data-form="person"]'),text=f?.elements.draft_note?.value.trim();if(!draft||draft.record||!text)return;if((draft.initialNotes||[]).length>=20)throw Error('Use at most 20 initial notes');draft.initialNotes ||= [];draft.initialNotes.push({client_key:crypto.randomUUID(),body:text});const n=new Date(),two=x=>String(x).padStart(2,'0'),author=S.session.user?.displayName||S.session.member.service_number||S.session.member.id;const entry=`${text} — ${two(n.getUTCHours())}:${two(n.getUTCMinutes())} UTC, ${two(n.getUTCDate())}/${two(n.getUTCMonth()+1)}/${n.getUTCFullYear()} — ${author}`;draft.notes=[draft.notes,entry].filter(Boolean).join('\n\n');f.elements.draft_note.value='';$('#draft-notes').textContent=draft.notes;void persistDesktopDraft().catch(e=>errorIn(f,e));}
+async function editProfile(p=null){S.selected=p;draft=p?null:{key:crypto.randomUUID().replaceAll('-',''),photos:[],record:null,notes:'',initialNotes:[],legacyNotes:''};const d=p?.data||{},selected=values(d.caution);modal(p?'Edit person':'Add Person',`<form data-form="person" novalidate>${formError()}<p class="muted">* Required field</p><p class="save-status" role="status" aria-live="polite" hidden></p><details class="person-section" open><summary>Personal Details</summary><div class="form-grid person-fields">${field('Name *',input('name',p?.name,'text','required maxlength="200"'))}${field('Alias',input('alias',p?.alias,'text','maxlength="300"'))}${field('D.O.B.',input('dob',p?.dob,'date',`max="${new Date().toISOString().slice(0,10)}"`))}${field('Estimated age',input('age',age(p?.dob),'text','readonly'))}${field('Sex',select('sex',['Male','Female','other'],d.sex?.toLowerCase()==='other'?'other':d.sex))}<label class="field" id="sex-other-field"><span>Other sex</span>${input('sex_other',d.sex_other,'text','maxlength="10"')}</label>${field('Address',input('address',d.address,'text','maxlength="500"'))}</div></details><details class="person-section" open><summary>Affiliation &amp; Operating Area</summary><div class="form-grid person-fields">${field('Gang affiliation',select('gang_affiliation',S.gangs,d.gang_affiliation))}${field('Function / Role',select('function_role',S.roles.map(r=>r.name),d.function_role))}${field(esc(S.shoe.label),select('shoe_size',S.shoe.options,d.shoe_size).replace('</select>',`${!p||canEdit(p)?'<option value="__new_area__" data-new-area="true">New area</option>':''}</select>`))}<label class="field" id="new-area-field" hidden><span>New area name</span><input name="new_area" maxlength="80" disabled><small>Shared with everyone when the profile saves successfully.</small></label>${field('Other gang details',input('gang_other',d.gang_other,'text','maxlength="160"'))}${['admin','editor'].includes(S.session.member.role)?field('Classification',select('classification',['Standard','Restricted'],p?.classification||'Standard')):''}<div class="field full"><span>Caution — select all that apply</span><details><summary>${selected.length?selected.length+' selected':'Select cautions'}</summary><div class="checks">${[...new Set([...cautions,...selected])].map(c=>`<label><input type="checkbox" name="caution" value="${esc(c)}" ${selected.includes(c)?'checked':''}>${esc(c)}</label>`).join('')}</div></details></div>${field('Custom caution',input('custom_caution','','text','maxlength="160"'))}</div></details><details class="person-section" open><summary>Physical description</summary><div class="form-grid person-fields">${field('Distinguishing marks',input('marks',d.marks,'text','maxlength="2000"'))}${field('Notes / Description',`<textarea name="description" maxlength="7000">${esc(p?.description||'')}</textarea>`,true)}</div></details>${p?'<p class="muted">Existing photographs are kept.</p>':'<section class="draft-photos"><h3>Photographs</h3><p class="muted">Add up to three PNG or JPEG photos, up to 5 MB each. The first becomes the display picture.</p><input type="file" id="draft-photo-files" accept="image/png,image/jpeg" multiple aria-label="Add photographs"><div id="draft-photo-previews" class="photo-grid"></div></section>'}${!p?`<section class="tile notes-card"><h3>Notes</h3><details class="note-composer"><summary>Add a new note</summary>${field('Note','<textarea name="draft_note" maxlength="500"></textarea>')}${btn('Add dated note','draft-note','','primary')}</details><details class="note-history"><summary>Note History</summary><p class="notes" id="draft-notes">No notes recorded.</p></details></section>`:''}<div class="person-save"><button type="submit" class="primary">Save profile</button></div></form>`);updateGangFields();updateSexFields();
+ if(!p){const openedDraft=draft;try{const saved=await call('draft',{op:'read'});if(draft!==openedDraft)return;if(saved&&draft&&confirm('Restore your securely saved unfinished profile?')){draft={key:saved.key,photos:saved.photos,record:saved.record,notes:saved.notes||'',initialNotes:saved.initialNotes||[],legacyNotes:saved.legacyNotes??saved.notes??''};const f=$('form[data-form="person"]');for(const [name,value]of Object.entries(saved.fields||{})){const el=f.elements.namedItem(name);if(el&&'value'in el)el.value=value;}for(const el of f.querySelectorAll('[name=caution]'))el.checked=(saved.cautions||[]).includes(el.value);updateGangFields();updateSexFields();drawDraftPhotos();$('#draft-notes').textContent=draft.notes||'No notes recorded.';f.dataset.dirty='true';updateAreaField();if(draft.record)for(const el of f.elements)if(el.type!=='submit')el.disabled=true;}else if(saved){await call('draft',{op:'clear'});}}catch(e){toast(e.message);}}
+}
+function updateAreaField(){const f=$('form[data-form="person"]');if(!f)return;const isNew=f.elements.shoe_size.value==='__new_area__';$('#new-area-field').hidden=!isNew;f.elements.new_area.disabled=!isNew;}
+async function persistDesktopDraft(){const f=$('form[data-form="person"]');if(!draft||!f)return;const fields={};for(const el of f.elements)if(el.name&&el.type!=='checkbox'&&el.type!=='file')fields[el.name]=el.value;await call('draft',{op:'save',payload:{key:draft.key,record:draft.record,notes:draft.notes,initialNotes:draft.initialNotes,legacyNotes:draft.legacyNotes,fields,cautions:[...f.querySelectorAll('[name=caution]:checked')].map(e=>e.value),photos:draft.photos.map(p=>({bytes:p.bytes}))}});}
+document.addEventListener('input',e=>{if(e.target.closest('form[data-form="person"]')&&draft)void persistDesktopDraft().catch(error=>errorIn(e.target.closest('form'),error));});
+document.addEventListener('change',e=>{if(e.target.closest('form[data-form="person"]')&&draft)void persistDesktopDraft().catch(error=>errorIn(e.target.closest('form'),error));});
+function drawDraftPhotos(){const el=$('#draft-photo-previews');if(!el||!draft)return;el.innerHTML=draft.photos.map((p,i)=>`<div><img src="${p.src}" alt="Selected photograph ${i+1}"><small>${i===0?'Display picture':'Photograph '+(i+1)}</small><div class="photo-controls">${i?btn('Make display picture','draft-first',`data-index="${i}"`):''}${btn('Remove','draft-remove',`data-index="${i}"`)}</div></div>`).join('');}
+const readPhoto=file=>new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(Error('Unable to read photograph'));reader.readAsDataURL(file);});
+document.addEventListener('change',async event=>{if(event.target.id!=='draft-photo-files'||!draft)return;const current=draft,files=[...event.target.files],f=event.target.closest('form');try{if(current.record)return;if(files.length+current.photos.length>3)throw Error('Choose up to three photographs in total');if(files.some(p=>!['image/png','image/jpeg'].includes(p.type)||!p.size||p.size>5242880))throw Error('Use PNG or JPEG photographs up to 5 MB');f.dataset.submitting='true';const additions=await Promise.all(files.map(async file=>{const src=await readPhoto(file);return {src,bytes:Uint8Array.from(atob(src.split(',')[1]),c=>c.charCodeAt(0))};}));if(draft!==current)return;current.photos.push(...additions);f.dataset.dirty='true';drawDraftPhotos();await persistDesktopDraft();}catch(e){errorIn(f,e);}finally{f.dataset.submitting='false';event.target.value='';}});
+function updateGangFields(){const f=$('form[data-form="person"]');if(!f)return;const gang=f.elements.gang_affiliation.value,noRole=['No Affiliation','No gang affiliation'].includes(gang);f.elements.function_role.disabled=noRole;f.elements.function_role.closest('.field').hidden=noRole;f.elements.gang_other.closest('.field').hidden=gang!=='Others';}
+function flagForm(){const p=S.selected;modal('Flag profile',`<form data-form="flag">${formError()}${field('Flag',select('flag',flags,p.flag,'No flag'))}${field('Other flag details',`<textarea name="note" maxlength="500">${esc(p.flag_note||'')}</textarea>`)}<p class="muted">Visible to everyone authorized to access this profile.</p><button type="submit" class="primary">Apply flag</button></form>`);}
+const H={view:'menu',reviewer:'',page:1};
+async function accountApprovals(main,sequence){
+ if(!admin())throw Error('Administrator permission required');
+ const view=H.view,history=['approved','rejected','other'].includes(view);
+ const title={menu:'Account approvals',pending:'Pending Approval',existing:'Existing Accounts',history:'Approval History',approved:'Approved',rejected:'Rejected',other:'Other outcomes'}[view];
+ let body='';
+ const nav=(label,to)=>btn(label,'account-nav',`data-view="${to}"`);
+ if(view==='menu')body=nav('Pending Approval','pending')+nav('Approval History','history');
+ else if(view==='history')body=nav('Approved','approved')+nav('Rejected','rejected')+nav('Other outcomes','other');
+ else if(view==='existing'){
+  const rows=await rpc('members');
+  body=rows.map(m=>`<div class="row"><div class="row-info"><strong>${esc(m.service_number||'Number not linked')}</strong><small>${esc(m.surname)} · ${esc(m.email)} · ${esc(m.role)}</small></div>${btn('Link number','account-number',`data-id="${m.id}" data-number="${esc(m.service_number)}"`)}</div>`).join('')||'<p>No existing accounts.</p>';
+ } else {
+  const result=history?await rpc('account_history',{decision:view,page:H.page,...(H.reviewer?{reviewer:H.reviewer}:{})}):null;
+  const rows=result?result.items:await rpc('account_requests',{filter:'pending'});
+  if(view==='pending')body+=nav('Existing Accounts','existing');
+  if(result?.can_filter_reviewer&&view!=='other')body+=field(view==='approved'?'Approved By':'Rejected By',`<select id="history-reviewer">${option('','All administrators',H.reviewer)}${result.reviewers.map(r=>option(r.id,r.label,H.reviewer)).join('')}</select>`);
+  body+=rows.map(r=>`<div class="row"><div class="row-info"><strong>${esc(r.full_name||r.service_number)}</strong><small>${esc(r.service_number)} · ${esc(r.kind)} · ${esc(r.status)}</small>${r.reviewed_at?`<small>Reviewed ${esc(new Date(r.reviewed_at).toLocaleString())} · ${esc(r.reviewer_name||'')}</small>`:''}</div>${r.status==='pending'?`<div class="actions">${btn('Approve','review',`data-id="${r.id}" data-kind="${r.kind}" data-decision="approve"`,'primary')}${btn('Reject','review',`data-id="${r.id}" data-kind="${r.kind}" data-decision="reject"`,'danger')}</div>`:''}</div>`).join('')||'<p>No requests.</p>';
+  if(result)body+=`<p>Page ${H.page} · ${result.total} requests</p>${btn('Previous','history-page',`data-page="${H.page-1}" ${H.page<=1?'disabled':''}`)}${btn('Next','history-page',`data-page="${H.page+1}" ${H.page*50>=result.total?'disabled':''}`)}`;
+ }
+ if(sequence!==renderSequence||!S.session)return;
+ const back=view==='menu'?btn('Back to Settings','nav','data-view="settings"'):nav('Back',view==='existing'?'pending':history?'history':'menu');
+ main.innerHTML=`${back}<h1>${title}</h1>${body}`;
+}
+document.addEventListener('change',async e=>{if(e.target.id!=='history-reviewer')return;H.reviewer=e.target.value;H.page=1;await render();});
+
+function settings(main){main.innerHTML=`<div class="section-head"><h1>Settings</h1></div><div class="settings-grid">${btn("General","nav","data-view=general","tile")}${admin()?btn("Administration & security","nav","data-view=administration","tile"):""}${btn("About","about","","tile")}${admin()?btn("Archived profiles","rel-archive","","tile")+btn("Change history","rel-history","","tile"):""}${admin()?[[ 'requests','Account requests','Review registration and password-reset requests.','shield'],['members','Personnel','Manage accounts and roles.','user'],['gangs','Gang options','Add or remove available affiliations.','list'],['roles','Function / Role','Manage names and descriptions.','list'],['config','App identity','Manage shared titles and notices.','settings']].map(([view,title,desc,ic])=>btn(icon(ic)+`<h3>${title}</h3><small>${desc}</small>`,'nav',`data-view="${view}"`,'tile')).join(''):''}${['admin','auditor'].includes(S.session.member.role)?btn(icon('list')+'<h3>Audit</h3><small>Recent recorded actions.</small>','nav','data-view="audit"','tile'):''}${btn(icon('list')+'<h3>Tutorial</h3><small>Explore the main features.</small>','tutorial','','tile')}${btn(icon('refresh')+'<h3>App updates</h3><small>View shared Android update status.</small>','nav','data-view="releases"','tile')}<section class="tile full"><h3>Downloaded profiles</h3><p id="cache-status" class="muted">Checking downloaded data…</p><small>Cards and viewed photographs are downloaded automatically and encrypted on this computer. Unchanged photos are reused. Online sign-in is required.</small>${btn('Clear downloaded data','cache-clear')}</section><section class="tile full"><h3>Session</h3><small>Signed in as ${esc(S.session.user?.displayName||S.session.member.service_number)}. Locks after five minutes of inactivity or when Windows locks.</small>${btn(icon('out')+'Sign out','logout')}</section><section class="tile full"><h3>Web preview</h3><small>Internet is required for gallery access. This version does not provide offline capture or Windows biometric sign-in.</small></section></div>`;void call('cacheStatus').then(r=>{const el=$('#cache-status');if(el)el.textContent=r?.available?`${r.cards} cards · ${r.photos} photos · ${(r.bytes/1048576).toFixed(1)} MB / 250 MB photo limit`:r?.message||'Downloaded storage unavailable';}).catch(()=>{});}
+async function renderAdmin(main,sequence){const title={requests:'Account requests',members:'Personnel',gangs:'Gang options',roles:'Function / Role',config:'App identity',audit:'Audit',releases:'Mobile releases'}[S.view]||'Settings';let body='';
+ if(S.view==='gangs'){const rows=await rpc('gangs');const areas=await gnet('area_options');S.shoe=await rpc('shoe_settings');body=`<section class="tile"><h2>Area options</h2><form data-form="area-option">${formError()}${field('Area name',input('name','','text','required maxlength="120"'))}<button type="submit">Add Area</button></form>${areas.map(n=>`<p>${esc(n)}</p>`).join('')||'<p>No area options configured.</p>'}</section><section class="tile"><h2>${esc(S.shoe.label)}</h2>${S.shoe.can_rename===true?`<form data-form="shoe-label">${formError()}${field('Field name',input('name',S.shoe.label,'text','required maxlength="80"'))}<button type="submit">Save field name</button></form>`:''}<form data-form="shoe-add">${formError()}${field('New option',input('name','','text','required maxlength="80"'))}<button type="submit">Add</button></form>${S.shoe.options.map(v=>`<p>${esc(v)}</p>`).join('')||'<p>No options configured.</p>'}</section><form data-form="gang">${formError()}<div class="searchbar">${input('name','','text','required maxlength="80" placeholder="Gang name" aria-label="Gang name"')}<button type="submit" class="primary">Add gang</button></div></form>${rows.map(name=>`<div class="row"><strong>${esc(name)}</strong>${!['No Affiliation','Others'].includes(name)?btn('Remove','gang-remove',`data-name="${esc(name)}"`,'danger'):''}</div>`).join('')}`;}
+ else if(S.view==='roles'){const rows=await rpc('roles');S.roles=rows;body=btn(icon('plus')+'Add role','role-add','','primary')+rows.map(r=>`<div class="row"><div class="row-info"><strong>${esc(r.name)}</strong><p class="muted">${esc(r.description)}</p></div><div class="actions">${btn('Edit','role-edit',`data-id="${r.id}"`)}${btn('Remove','role-remove',`data-id="${r.id}"`,'danger')}</div></div>`).join('');}
+ else if(S.view==='members'){const rows=await rpc('members');body=rows.map(m=>`<div class="row"><div class="row-info"><strong>${esc(m.surname||m.service_number||m.email)}</strong><small>${esc(m.service_number||'No regimental number')} · ${esc(m.role)} · ${m.active?'Active':'Inactive'}</small></div>${m.id!==S.session.member.id?`<div class="actions">${m.role!=='admin'?btn('Edit access','member-edit',`data-member="${esc(JSON.stringify(m))}"`):''}${S.session.member.can_remove_admin&&m.role!=='admin'&&m.active?btn('Appoint admin','member-promote',`data-id="${m.id}"`):''}${m.role!=='admin'||S.session.member.can_remove_admin?btn('Remove','member-remove',`data-id="${m.id}"`,'danger'):''}</div>`:''}</div>`).join('');}
+ else if(S.view==='requests'){const rows=await rpc('account_requests',{filter:'pending'});body=rows.length?rows.map(r=>`<div class="row"><div class="row-info"><strong>${esc(r.full_name||r.service_number)}</strong><small>${esc(r.service_number)} · ${esc(r.kind)} · ${esc(r.status)}</small></div><div class="actions">${btn('Approve','review',`data-id="${r.id}" data-kind="${r.kind}" data-decision="approve"`,'primary')}${btn('Reject','review',`data-id="${r.id}" data-kind="${r.kind}" data-decision="reject"`,'danger')}</div></div>`).join(''):'<div class="empty">No pending account requests.</div>';}
+ else if(S.view==='audit'){const rows=await rpc('audit');body=rows.map(r=>`<div class="row"><div class="row-info"><strong>${esc(r.action)}</strong><p>${esc(r.actor)} · ${esc(r.target)}</p><small>${esc(new Date(r.time).toLocaleString())}</small></div></div>`).join('')||'<div class="empty">No audit entries.</div>';}
+ else if(S.view==='config'){const c=await rpc('config');body=`<form data-form="config">${formError()}${[['organization','Parent organization'],['unit','Unit'],['title','System title'],['notice','Development notice'],['security','Security notice']].map(([name,label])=>field(label,input(name,c[name],'text','required maxlength="1000"'))).join('')}<button type="submit" class="primary">Save shared identity</button></form>`;}
+ else if(S.view==='releases'){const r=await rpc('release_latest');body=r?`<section class="tile"><h2>Android ${esc(r.version_name)}</h2><span class="badge">${r.released_at?'Released to users':'Administrator preview'}</span><p class="notes">${esc(r.notes)}</p><small>${r.bytes?Math.round(r.bytes/1048576)+' MB':''} · Android update</small>${r.can_release&&!r.released_at?btn('Release update to users','release',`data-id="${r.id}"`,'primary'):''}</section>`:'<div class="empty">No mobile update is available.</div>';}
+ if(sequence===renderSequence&&S.session)main.innerHTML=`<div class="subhead">${btn(icon('back'),'nav','data-view="settings" aria-label="Back to Settings"','icon-only')}<h1>${title}</h1></div>${body}`;
+}
+function roleForm(r={}){modal(r.id?'Edit role':'Add role',`<form data-form="role">${formError()}${input('id',r.id,'hidden')}${field('Name',input('name',r.name,'text','required maxlength="80"'))}${field('Description',`<textarea name="description" maxlength="1000">${esc(r.description)}</textarea>`)}<button class="primary" type="submit">Save role</button></form>`);}
+function memberForm(m){modal('Edit account access',`<form data-form="member">${formError()}${input('id',m.id,'hidden')}<p>${esc(m.surname||m.email)}</p>${field('Role',select('role',['base','editor'],m.role))}${field('Account status',`<select name="active">${option('1','Active',m.active?'1':'0')}${option('0','Inactive',m.active?'1':'0')}</select>`)}${field('Regimental number',input('service_number',m.service_number,'text','pattern="[0-9]{1,12}" maxlength="12"'))}<button class="primary" type="submit">Save access</button></form>`);}
+async function crop(slot){const p=S.selected,src=await photo(p,slot);cropImage=new Image();cropImage.src=src;await cropImage.decode();cropSlot=slot;modal('Crop photograph',`<canvas id="crop-preview" class="crop-preview"></canvas><p class="muted">Adjust the crop area, then save. The existing photo is replaced.</p><div class="crop-controls">${[['left','Left',0],['top','Top',0],['width','Width',100],['height','Height',100]].map(([name,label,value])=>field(label,`<input type="range" id="crop-${name}" min="${name==='width'||name==='height'?10:0}" max="100" value="${value}">`)).join('')}</div>${formError()}`,btn('Save cropped photo','crop-save','','primary'));drawCrop();}
+function cropRect(){const x=Math.min(Number($('#crop-left').value),90)/100,y=Math.min(Number($('#crop-top').value),90)/100,w=Math.min(Number($('#crop-width').value)/100,1-x),h=Math.min(Number($('#crop-height').value)/100,1-y);return {x:x*cropImage.naturalWidth,y:y*cropImage.naturalHeight,w:w*cropImage.naturalWidth,h:h*cropImage.naturalHeight};}
+function drawCrop(){if(!cropImage||!$('#crop-preview'))return;const c=$('#crop-preview'),r=cropRect(),scale=Math.min(1,600/r.w,350/r.h);c.width=Math.round(r.w*scale);c.height=Math.round(r.h*scale);c.getContext('2d').drawImage(cropImage,r.x,r.y,r.w,r.h,0,0,c.width,c.height);}
+async function saveCrop(){const r=cropRect(),c=document.createElement('canvas'),scale=Math.min(1,1800/r.w,1800/r.h);c.width=Math.round(r.w*scale);c.height=Math.round(r.h*scale);c.getContext('2d').drawImage(cropImage,r.x,r.y,r.w,r.h,0,0,c.width,c.height);const blob=await new Promise(resolve=>c.toBlob(resolve,'image/jpeg',.9));if(!blob)throw Error('Photo could not be cropped');await call('uploadPhoto',{id:S.selected.id,version:S.selected.version,slot:cropSlot,bytes:new Uint8Array(await blob.arrayBuffer())});await openProfile(S.selected.id);void render();}
+async function action(button){if(button.dataset.action==='draft-note'){appendDraftNote();return;}const a=button.dataset.action,id=button.dataset.id;
+ if(a.startsWith('morning-')){await morningAction(a,button);return;}
+ if(a==='review-edit'){editProfile(await rpc('record',{id}));return;}
+ if(a==='review-approve'||a==='review-delete'){if(!confirm(a==='review-approve'?'Approve this card?':'Delete this pending card?'))return;await rpc(a==='review-approve'?'card_approve':'card_delete',{id,version:Number(button.dataset.version)});await render();return;}
+ if(a==='account-nav'){H.view=button.dataset.view;H.reviewer='';H.page=1;await render();}
+ else if(a==='history-page'){H.page=Number(button.dataset.page);await render();}
+ else if(a==='account-number'){const number=prompt('Verified regimental number',button.dataset.number||'');if(number!==null){await rpc('member_number',{id,service_number:number.trim()});await render();}}
+ else if(a==='nav'){if($('#modal').open&&!closeModal())return;if(button.dataset.view==='gnet'){G.gang=null;G.area=null;G.span=false;}S.view=button.dataset.view;if(S.view==='requests'){H.view='menu';H.reviewer='';H.page=1;}S.page=1;S.filters={};await render();}
+ else if(a.startsWith('gnet-'))await gnetAction(a,button);
+ else if(a==='tutorial')tutorial(0);
+ else if(a==='tutorial-step')tutorial(Number(button.dataset.step));
+ else if(a==='refresh')await render();
+ else if(a==='draft-remove'||a==='draft-first'){if(!draft||draft.record)return;const i=Number(button.dataset.index);if(a==='draft-remove')draft.photos.splice(i,1);else draft.photos.unshift(...draft.photos.splice(i,1));drawDraftPhotos();await persistDesktopDraft();}
+ else if(a==='cache-clear'){if(confirm('Clear downloaded cards and photographs from this computer for your account?')){await call('cacheClear');S.photos.clear();settings($('#content'));toast('Downloaded data cleared');}}
+ else if(a==='logout'){if(confirm('Sign out? Unsaved changes will be lost.'))await call('logout');}
+ else if(a==='register')registration();else if(a==='reset-request')resetForm(false);else if(a==='reset-complete')resetForm(true);
+ else if(a==='cancel-mfa'){await call('logout');reset();}
+ else if(a==='close')closeModal();else if(a==='add')editProfile();else if(a==='edit')editProfile(S.selected);
+ else if(a==='open')await openProfile(id);
+ else if(a==='save'){await rpc('saved',{id,state:button.dataset.saved==='true'?'remove':'add'});toast(button.dataset.saved==='true'?'Profile unsaved':'Profile saved');if(button.dataset.detail)await openProfile(id);void render();}
+ else if(a==='page'){S.page=Number(button.dataset.page);await render();}
+ else if(a==='clear-filters'){S.filters={};S.page=1;await render();}
+ else if(a==='flag')flagForm();
+ else if(a==='delete-profile'){if(confirm(`Delete ${S.selected.name} for all users?`)){await rpc('record_delete',{id:S.selected.id,version:S.selected.version});closeModal(true);await render();toast('Profile deleted');}}
+ else if(a==='upload-photo'){const f=$('#photo-file').files[0];if(!f)throw Error('Select a photograph first');if(!['image/png','image/jpeg'].includes(f.type)||f.size>5242880)throw Error('Select a PNG or JPEG up to 5 MB');await call('uploadPhoto',{id:S.selected.id,version:S.selected.version,bytes:new Uint8Array(await f.arrayBuffer())});await openProfile(S.selected.id);void render();}
+ else if(a==='delete-photo'){if(confirm('Delete this photograph? The next photo becomes the display picture if needed.')){await call('photo',{id:S.selected.id,slot:Number(button.dataset.slot),version:S.selected.version,method:'DELETE'});await openProfile(S.selected.id);void render();}}
+ else if(a==='crop')await crop(Number(button.dataset.slot));else if(a==='crop-save')await saveCrop();
+ else if(a==='theme'){document.body.dataset.theme=button.dataset.theme;try{localStorage.setItem('iatf.desktop.theme',button.dataset.theme);}catch{}await render();}
+ else if(a==='gang-remove'){if(confirm('Remove this gang option?')){await rpc('gang_remove',{name:button.dataset.name});await loadOptions();await render();}}
+ else if(a==='role-add')roleForm();else if(a==='role-edit')roleForm(S.roles.find(r=>r.id===id));
+ else if(a==='role-remove'){if(confirm('Remove this Function / Role option?')){await rpc('role_remove',{id});await loadOptions();await render();}}
+ else if(a==='member-edit')memberForm(JSON.parse(button.dataset.member));
+ else if(a==='member-remove'||a==='member-promote'){if(confirm(a==='member-remove'?'Remove this account and revoke its sessions?':'Appoint this account as an administrator?')){await rpc(a==='member-remove'?'member_remove':'member_promote',{id});await render();}}
+ else if(a==='review'){if(!confirm(`${button.dataset.decision==='approve'?'Approve':'Reject'} this ${button.dataset.kind} request?`))return;const r=await account('review',{id,decision:button.dataset.decision,operation:button.dataset.kind==='registration'?'registration_decide':'reset_decide'});await render();if(r.recovery_code)modal('One-time recovery code',`<p>${esc(r.message)}</p><p class="secret-code">${esc(r.recovery_code)}</p>`);else toast('Request reviewed');}
+ else if(a==='release'){if(confirm('Release this Android update to all users? This makes it available beyond administrators.')){await rpc('release_to_users',{id});await render();toast('Update released');}}
+}
+document.addEventListener('click',async event=>{const b=event.target.closest('button[data-action]');if(!b||b.disabled)return;if(['rel-sessions','rel-history','rel-archive','rel-revoke','rel-restore','rel-page','verification','rel-span','span-edit','span-remove','about','export-profile','check-duplicates','span-search','span-choose'].includes(b.dataset.action))return;b.disabled=true;const previous=b.innerHTML;const uploading=b.dataset.action==='upload-photo'||b.dataset.action==='crop-save';if(uploading){b.textContent='Uploading photograph…';b.setAttribute('aria-busy','true');}try{await action(b);}catch(e){if($('#modal').open)errorIn($('#modal'),e);else toast(e.message);}finally{b.disabled=false;if(uploading){b.innerHTML=previous;b.removeAttribute('aria-busy');}}});
+document.addEventListener('submit',async event=>{const f=event.target;if(!f.dataset.form)return;event.preventDefault();if(f.dataset.form==='person'&&!validatePersonFields(f))return;const submit=f.querySelector('button[type=submit]');if(submit?.disabled||f.dataset.submitting==='true')return;if(submit)submit.disabled=true;f.setAttribute('aria-busy','true');const status=f.querySelector('.save-status');if(status){status.hidden=false;status.textContent='Saving profile and uploading any photographs…';}const b=Object.fromEntries(new FormData(f));try{
+ const kind=f.dataset.form;
+ if(kind==='login'){const r=await call(loginMfa?'mfa':'login',b);if(r.mfa_required){loginMfa=true;login();}else{f.reset();await enter(r.session);}}
+ else if(['register','reset_request','reset_complete'].includes(kind)){const r=await account(kind,b);f.reset();closeModal(true);login(r.message||'Request submitted');}
+ else if(kind==='morning-message'){const identity=JSON.stringify([b.message.trim(),b.duration,morningData.period_start]);if(f.dataset.messageBody!==identity){f.dataset.messageKey=crypto.randomUUID();f.dataset.messageBody=identity;}await rpc('morning_message_add',{period_start:morningData.period_start,body:b.message.trim(),client_key:f.dataset.messageKey,duration_hours:Number(b.duration)});f.reset();await loadMorning();}
+ else if(kind==='search'){S.filters=b;S.page=1;await render();}
+ else if(kind==='person'){appendDraftNote();const p=S.selected,c=[...new FormData(f).getAll('caution'),...(b.custom_caution?.trim()?[b.custom_caution.trim()]:[])];const payload=draft?.record||{id:p?.id||null,version:p?.version,name:b.name.trim(),alias:b.alias.trim(),dob:b.dob,classification:b.classification||p?.classification||'Standard',status:p?.status||'Under review',description:b.description,data:{...(p?.data||{}),...(!p?{initial_notes:draft?.initialNotes,notes_legacy:draft?.legacyNotes,notes:draft?.notes||''}:{}),marks:b.marks||'',address:b.address.trim(),sex:b.sex,sex_other:b.sex==='other'?(b.sex_other||'').trim():'',shoe_size:f.elements.shoe_size.selectedOptions[0]?.dataset.newArea==='true'?'':b.shoe_size||'',new_area:(b.new_area||'').trim(),caution:[...new Set(c)],gang_affiliation:b.gang_affiliation,gang_other:b.gang_affiliation==='Others'?b.gang_other:'',function_role:b.gang_affiliation==='No Affiliation'?'':b.function_role||''}};let r;
+ if(draft&&!draft.record){const matches=await reliability('duplicates',{name:payload.name,alias:payload.alias,dob:payload.dob});if(matches.items?.length&&!confirm('Possible existing profiles:\n'+matches.items.map(x=>x.name+' · '+x.reference+' · '+x.dob).join('\n')+'\nCreate a separate profile anyway?'))return;}
+ if(draft){await persistDesktopDraft();const current=draft;current.record ||= payload;await persistDesktopDraft();f.dataset.submitting='true';for(const el of f.elements)if(el!==submit)el.disabled=true;submit.textContent='Saving and uploading…';try{const result=await call('savePerson',{record:current.record,offlineKey:current.key,photos:current.photos.map(p=>({bytes:p.bytes}))});if(!result.complete)throw Error('Profile saved. Some photos still need uploading. '+result.error+' Press Retry to continue.');r=result.record;}catch(e){if(e.creationMayExist===false){current.record=null;for(const el of f.elements)el.disabled=false;updateGangFields();updateSexFields();updateAreaField();await persistDesktopDraft();}throw e;}finally{f.dataset.submitting='false';submit.textContent='Retry save and upload';}}else r=await rpc('record_save',payload);
+ f.dataset.dirty='false';if(draft)await call('draft',{op:'clear'}).catch(()=>toast('Profile saved, but the local draft could not be cleared.'));draft=null;if(r.data?.shoe_size&&!S.shoe.options.includes(r.data.shoe_size))S.shoe.options.push(r.data.shoe_size);await openProfile(r.id);void render();toast('Profile saved successfully');}
+ else if(kind==='dated-note'&&Array.isArray(S.selected.data?.note_entries)){const p=S.selected;f.dataset.noteKey ||= crypto.randomUUID();await rpc('note_add',{id:p.id,client_key:f.dataset.noteKey,body:b.note.trim()});await openProfile(p.id);}
+ else if(kind==='dated-note'){const p=S.selected,n=new Date(),two=x=>String(x).padStart(2,'0'),author=S.session.user?.displayName||S.session.member.service_number||S.session.member.id,entry=`${b.note.trim()} — ${two(n.getUTCHours())}:${two(n.getUTCMinutes())} UTC, ${two(n.getUTCDate())}/${two(n.getUTCMonth()+1)}/${n.getUTCFullYear()} — ${author}`;await rpc('record_save',{id:p.id,version:p.version,name:p.name,alias:p.alias,dob:p.dob,status:p.status,classification:p.classification,description:p.description,data:{...p.data,notes:[p.data?.notes,entry].filter(Boolean).join('\n\n')}});await openProfile(p.id);}
+ else if(kind==='flag'){await rpc('record_flag',{...b,id:S.selected.id,version:S.selected.version});await openProfile(S.selected.id);void render();}
+ else if(kind==='area-option'){await gnet('area_option_add',{name:b.name.trim()});await render();}
+ else if(kind==='gnet-add'){await gnet('add',{name:b.name,...(G.gang?{gang_id:G.gang.id}:{})});closeModal(true);await render();}
+ else if(kind==='gang'){await rpc('gang_add',b);await loadOptions();await render();}
+ else if(kind==='shoe-label'||kind==='shoe-add'){S.shoe=await rpc(kind==='shoe-label'?'shoe_label_save':'shoe_option_add',{name:b.name.trim()});await render();}
+ else if(kind==='role'){await rpc('role_save',{...b,id:b.id||null});closeModal(true);await loadOptions();await render();}
+ else if(kind==='member'){await rpc('member_save',{id:b.id,role:b.role,active:b.active});if(b.service_number)await rpc('member_number',{id:b.id,service_number:b.service_number});closeModal(true);await render();}
+ else if(kind==='config'){await rpc('config_save',b);S.config=b;toast('Shared identity saved');}
+ else if(kind==='admin-email'){await account('admin_email',b);closeModal(true);await call('logout');login('Email saved. Sign in with your email and existing password.');}
+ }catch(e){errorIn(f,e);}finally{f.setAttribute('aria-busy','false');if(status)status.hidden=true;if(submit)submit.disabled=false;}});
+document.addEventListener('input',event=>{const f=event.target.closest('form');if(f&&f.dataset.form!=='login')f.dataset.dirty='true';if(event.target.name==='dob'&&f?.elements.age)f.elements.age.value=age(event.target.value);if(event.target.name==='gang_affiliation')updateGangFields();if(event.target.id.startsWith('crop-'))drawCrop();});
+$('#modal').addEventListener('cancel',event=>{event.preventDefault();closeModal();});
+let lastActivity=0;for(const name of ['pointerdown','keydown','wheel'])document.addEventListener(name,()=>{const now=Date.now();if(S.session&&now-lastActivity>1000){lastActivity=now;void window.iatf.call('activity');}},{passive:true});
+setInterval(async()=>{if(S.session&&!document.hidden)try{await rpc('session');S.photos.clear();const options=await rpc('shoe_settings');const renamed=options.label!==S.shoe.label;S.shoe=options;if(renamed&&!$('#modal').open)void render();}catch(e){if(e.status!==401&&e.status!==403){const sync=$('.sync span');if(sync)sync.textContent='Unable to check server access · '+syncText();}}},30000);
+setInterval(()=>{if(S.session&&!document.hidden&&!$('#modal').open&&['home','search','saved'].includes(S.view))void render();},300000);
+try{const theme=localStorage.getItem('iatf.desktop.theme');if(['White','Black','Camo'].includes(theme))document.body.dataset.theme=theme;}catch{}
+$('#app').innerHTML='<section class="startup-screen" role="status"><img src="startup-chrome.png" alt="Rogues Gallery™. By Police, For Police."></section>';
+const startupImage=document.querySelector('.startup-screen img');
+let startupTimerStarted=false;
+function beginStartupDelay(){if(startupTimerStarted)return;startupTimerStarted=true;setTimeout(()=>{if(document.querySelector('.startup-screen'))login();},2000);}
+startupImage.addEventListener('load',beginStartupDelay,{once:true});
+if(startupImage.complete&&startupImage.naturalWidth>0)beginStartupDelay();
+
+function closePhotoViewer(){const d=$('#photo-viewer');if(d){d.close();d.innerHTML='';}}
+function enlargePhoto(src){const d=$('#photo-viewer');d.innerHTML=`<div class="dialog-head"><h2>Photograph</h2>${btn('Close','photo-close')}</div><div class="photo-viewport"><img src="${src}" alt="Enlarged profile photograph"></div><div class="dialog-foot">${btn('−','photo-out','aria-label="Zoom out"')}${btn('Reset','photo-reset')}${btn('+','photo-in','aria-label="Zoom in"')}</div>`;d.dataset.zoom='1';d.showModal();}
+document.addEventListener('click',event=>{const b=event.target.closest('[data-action]');if(!b)return;const a=b.dataset.action;if(a==='enlarge-photo'){const img=b.querySelector('img');if(img&&S.session)enlargePhoto(img.src);}else if(a==='photo-close')closePhotoViewer();else if(['photo-in','photo-out','photo-reset'].includes(a)){const d=$('#photo-viewer'),img=d.querySelector('img');if(!img)return;const zoom=a==='photo-reset'?1:Math.min(6,Math.max(1,Number(d.dataset.zoom)+(a==='photo-in'?0.5:-0.5)));d.dataset.zoom=String(zoom);img.style.width=zoom*100+'%';img.style.maxHeight=zoom===1?'100%':'none';}});
+$('#photo-viewer').addEventListener('cancel',event=>{event.preventDefault();closePhotoViewer();});
+
+const G={gang:null,area:null,span:false,items:[]};
+const gnet=(op,payload={})=>call('gnet',{op,payload});
+const comingSoon=title=>`<div class="empty"><h1>${esc(title)}</h1><h2>Coming soon</h2></div>`;
+async function renderGnet(main,sequence){
+ if(!admin()){main.innerHTML=comingSoon('G-Net');return;}
+ const header=`<div class="section-head"><div><h1>${esc(G.area?.name||G.gang?.name||'G-Net')}</h1>${G.gang?`<p>${esc(G.gang.name)}</p>`:''}</div>${btn('Refresh','refresh')}</div>${G.gang?btn('Back','gnet-back'):''}`;
+ if(G.area){
+  if(!G.span){main.innerHTML=header+btn(icon('list')+'Span of Control','gnet-span','','tile');return;}
+  const rows=await rpc('roles');if(sequence!==renderSequence||!admin())return;
+  const roles=[...new Set(rows.map(r=>r.name).filter(Boolean))],leaders=['leader','underboss','lieutenant'].flatMap(n=>roles.filter(r=>r.trim().toLowerCase()===n));
+  const card=n=>`<div class="role-placeholder"><strong>${esc(n)}</strong><p>Role placeholder</p></div>`;
+  main.innerHTML=header+btn('Manage assignments / Unassigned','rel-span')+'<h2>Span of Control</h2><p>Default layout · Function/Role options</p><p class="muted">Function/Role template. Open Manage assignments to view recorded relationships.</p><div class="role-leadership">'+leaders.map(card).join('<div class="role-line"></div>')+'</div><div class="role-remaining">'+roles.filter(n=>!leaders.includes(n)).map(card).join('')+'</div>'+(!roles.length?'<p>No Function/Role options configured.</p>':'');return;
+ }
+ const result=await gnet('list',{page:S.page,...(G.gang?{gang_id:G.gang.id}:{})});if(sequence!==renderSequence||!admin())return;G.items=result.items;
+ main.innerHTML=header+btn(G.gang?'Add Area card':'Add Gang Card','gnet-add','','primary')+'<div class="grid">'+(G.items.length?G.items.map(item=>`<section class="tile"><h2>${esc(item.name)}</h2>${btn(G.gang?'Open area':'Open gang','gnet-open',`data-id="${esc(item.id)}"`)}${btn('Delete','gnet-delete',`data-id="${esc(item.id)}"`,'danger')}</section>`).join(''):`<p>${G.gang?'No area cards added yet.':'No gang cards added yet.'}</p>`)+`</div><div class="pagination">${btn('Previous','gnet-page',`data-page="${S.page-1}" ${S.page<=1?'disabled':''}`)}<span>Page ${S.page}</span>${btn('Next','gnet-page',`data-page="${S.page+1}" ${S.page*50>=result.total?'disabled':''}`)}</div>`;
+}
+async function gnetAction(action,b){
+ if(!admin())return;
+ if(action==='gnet-open'){const item=G.items.find(i=>i.id===b.dataset.id);if(!item)return;if(G.gang)G.area=item;else G.gang=item;S.page=1;await render();}
+ else if(action==='gnet-back'){if(G.span)G.span=false;else if(G.area)G.area=null;else G.gang=null;S.page=1;await render();}
+ else if(action==='gnet-span'){G.span=true;await render();}
+ else if(action==='gnet-page'){S.page=Number(b.dataset.page);await render();}
+ else if(action==='gnet-add'){const opts=G.gang?await gnet('area_options'):await rpc('gangs');if(!admin()||S.view!=='gnet')return;modal(G.gang?'Add Area card':'Add Gang Card',opts.length?`<form data-form="gnet-add">${formError()}${field(G.gang?'Area':'Gang',select('name',opts,'','Select an option'))}<button type="submit" class="primary">Add</button></form>`:'<p>No options configured. Add choices in Settings → Gang options.</p>');}
+ else if(action==='gnet-delete'){const item=G.items.find(i=>i.id===b.dataset.id);if(item&&confirm(`Delete “${item.name}”${G.gang?'':' and its area cards'}?`)){await gnet('delete',{id:item.id,kind:G.gang?'area':'gang'});await render();}}
+}
+function tutorial(index){const steps=[
+ ['Welcome to Rogues Gallery','Use Next and Back to explore the main features.'],
+ ['Home and photographs','Home shows recently updated profiles. Click any photograph to enlarge it, then use the zoom controls. Close returns to your place.'],
+ ['Add a person','Enter details, cautions and affiliation. Date of birth calculates age. Select up to three photographs; the first is the display picture.'],
+ ['P.O.I. and saved profiles','Open P.O.I. → Search to search by name, alias or address area and apply filters. Saved is the third configured option after Search and Card Approvals; approval access is limited to administrators and editors. Save a profile, then find it in P.O.I. → Saved.'],
+ ['Mobile security','Android sign-in automatically uses the phone’s existing PIN, password, pattern or biometrics. Users without phone security must enable it before continuing. Settings → Security → Two-step sign in explains this and opens phone security settings. Offline capture reopening is prepared automatically after online sign-in for eligible accounts. Windows sign-in and downloaded-card storage remain separate; this desktop client does not provide mobile screen-lock verification.'],
+ ['Profile flags','Open a profile and select Flag. Choose a reason, or Other with details. The flag is visible to authorized users. All flags appear in Notifications. Only Outstanding Warrant and Killed send Android push alerts identifying the person, flag and officer; tapping an alert requires login and Two-step sign in before opening the profile. Windows push notifications are not available in this version.'],
+ ['E-Forms',admin()?'E-Forms replaces Saved in the main navigation. FI Form is its first option and currently shows Coming soon; form fields and submission will be added separately.':'E-Forms displays the same Coming soon screen as G-Net. Its contents are currently available to administrators only.'],
+ ['G-Net',admin()?'Create gang cards, add configured area cards, and open Span of Control. Manage area choices in Settings → Gang options.':'G-Net is coming soon.'],
+ ['Settings','Choose White, Black or Camo. Manage downloaded data and view App updates. Replay this guide from Tutorial.'],
+ ...(admin()?[['Administration','Open Account requests → Pending Approval → Existing Accounts for account-number information. Approval History separates Approved and Rejected accounts. Only Alex’s administrator account can filter with Approved By or Rejected By. Other outcomes holds other request states. Manage personnel and shared options from Settings. Only the designated owner can release administrator previews to other users.']]:[])];
+ const step=steps[Math.min(steps.length-1,Math.max(0,index))];modal(esc(step[0]),`<p>Step ${index+1} of ${steps.length}</p><p>${esc(step[1])}</p>`,btn('Close','close')+(index?btn('Back','tutorial-step',`data-step="${index-1}"`):'')+(index<steps.length-1?btn('Next','tutorial-step',`data-step="${index+1}"`):btn('Finish','close')));
+}
+
+function loadingCards(){return '<div role="status" aria-live="polite">Loading profiles…<div class="skeleton-list" aria-hidden="true">'+Array.from({length:3},()=>'<div class="skeleton-card"><i></i><span></span><span></span></div>').join('')+'</div></div>';}
+function validatePersonFields(form){
+ const invalid=[...form.elements].filter(el=>el.willValidate&&!el.validity.valid);
+ for(const el of form.elements)if(el.willValidate)el.setAttribute('aria-invalid',String(!el.validity.valid));
+ if(!invalid.length)return true;
+ const first=invalid[0];for(let p=first.parentElement;p&&p!==form;p=p.parentElement)if(p.tagName==='DETAILS')p.open=true;
+ first.focus();first.scrollIntoView?.({block:'center',behavior:window.matchMedia?.('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});
+ errorIn(form,first.validationMessage||'Complete the required fields.');return false;
+}
+document.addEventListener('input',e=>{if(e.target.closest('form[data-form="person"]')&&e.target.willValidate)e.target.setAttribute('aria-invalid',String(!e.target.validity.valid));});
+
+
+// Report period and acknowledgement are server-owned and shared across devices.
+let morningTimer, morningFinished=null, morningData=null, morningPage=1, morningDaysBack=0;
+async function morningReport(afterLogin=false){
+ morningPage=1; morningDaysBack=0;
+ let finish;
+ const done=new Promise(resolve=>finish=resolve);
+ if(afterLogin)morningFinished=finish;
+ await loadMorning(afterLogin);
+ if(afterLogin)await done;
+}
+function morningMessages(r){return r.messages.length?r.messages.map(n=>`<article class="tile notes"><p>${esc(n.body)}</p>${n.duration_hours!=null&&n.duration_hours!==-1&&n.expires_label?`<small>${esc(n.expires_label)}</small>`:''}${r.can_delete?btn('Delete message','morning-delete',`data-id="${esc(n.id)}"`):''}<small class="morning-author">${esc(n.author||'User')} · ${esc(n.posted_at||'Time not recorded')}</small></article>`).join(''):'<p>No announcements for this reporting day.</p>';}
+async function loadMorning(skipAcknowledged=false,background=false){
+ clearTimeout(morningTimer);
+ const request=++modalRequest,epoch=S.epoch;
+ const draftDuration=$('[data-form="morning-message"] [name=duration]')?.value||'-1';
+ const draftText=$('[data-form="morning-message"] textarea')?.value;
+ if(!background)morningData=null;
+ if(!background)modal('Morning Report Board','<p role="status">Loading report…</p>',btn('Read Later','close'));
+ try{
+  const r=await rpc('morning_report',{page:morningPage,days_back:morningDaysBack});
+  if(request!==modalRequest||epoch!==S.epoch||!S.session)return;
+  if(skipAcknowledged&&!r.needs_ack){closeModal(true);return;}
+  morningData=r;
+  const count=(label,n)=>`<article class="tile"><h3>${label}</h3><strong>${esc(n??'Not recorded')}</strong></article>`;
+  if(background&&$('[data-form="morning-message"]')&&($('[data-form="morning-message"] [name=message]').value||$('[data-form="morning-message"]').contains(document.activeElement))){$('#morning-messages').innerHTML=morningMessages(r);}
+  else modal('Morning Report Board',`${formError()}<h3 class="morning-date">${esc(r.display_date||r.date)}</h3>
+   <div class="morning-history-nav">${btn('← Previous report','morning-day',`data-day="${morningDaysBack+1}" ${morningDaysBack===6?'disabled':''}`)}<span>${morningDaysBack===0?'Today':'Archived report'}</span>${btn('More recent report →','morning-day',`data-day="${morningDaysBack-1}" ${morningDaysBack===0?'disabled':''}`)}</div>
+   ${r.reconstructed?'<p>Historical approval counts were not recorded for this day.</p>':''}
+   <h3 class="morning-kiv">K.I.V.</h3><div id="morning-messages">${morningMessages(r)}</div>
+   ${morningDaysBack===0&&r.can_post?`<details ${draftText?'open':''}><summary>Add K.I.V. Message</summary><form data-form="morning-message">${formError()}${field('Message','<textarea name="message" required maxlength="1000">'+esc(draftText||'')+'</textarea>')}${field('Set Duration','<select name="duration">'+[[-1,'Not set'],[4,'4 hours'],[8,'8 hours'],[12,'12 hours'],[24,'1 day'],[48,'2 days'],[72,'3 days'],[96,'4 days'],[120,'5 days'],[144,'6 days'],[168,'1 Week'],[0,'∞']].map(([v,label])=>`<option value="${v}" ${String(v)===draftDuration?'selected':''}>${label}</option>`).join('')+'</select>')}<button type="submit" class="primary">Post message</button></form></details>`:''}
+   ${count('Profile cards added in the previous 24-hour period',r.previous_count)}
+   ${count(morningDaysBack===0?'Profile cards added today so far':'Profile cards added that day',r.today_count)}
+   ${'pending_users' in r?count('User profiles pending approval',r.pending_users):''}
+   ${'pending_cards' in r?count('Profile cards awaiting Verification (Card Approvals)',r.pending_cards):''}
+   ${Number(r.warrant_total||0)>0?`<h3>Outstanding Warrants flagged in the previous period (${esc(r.warrant_total)})</h3><p>Counts and profiles follow your account’s access permissions.</p>
+   ${r.warrants.length?r.warrants.map(p=>`<article class="tile"><strong>${esc(p.name)}</strong><p>Flagged with Outstanding Warrant</p></article>`).join(''):'<p>No profiles flagged in this period.</p>'}
+   ${r.warrant_total>24?`<div class="pagination">${btn('Previous','morning-page',`data-page="${morningPage-1}" ${morningPage===1?'disabled':''}`)}<span>Page ${morningPage}</span>${btn('Next','morning-page',`data-page="${morningPage+1}" ${morningPage*24>=r.warrant_total?'disabled':''}`)}</div>`:''}`:''}
+   ${btn('Refresh report','morning-refresh')}`,
+   `<div class="morning-actions">${btn('Read Later','close')}${btn('OK','morning-ok','','primary')}</div>`);
+  morningTimer=setTimeout(()=>{if(new Date(r.next_refresh_at||r.next_period_end||r.period_end)>=new Date(r.next_period_end||r.period_end)){morningPage=1;morningDaysBack=0;void loadMorning();}else{void loadMorning(false,true);}},Math.max(0,new Date(r.next_refresh_at||r.next_period_end||r.period_end)-new Date(r.server_now)));
+ }catch(e){if(request===modalRequest&&epoch===S.epoch)modal('Morning Report Board',`${formError()}<p role="alert">${esc(e.message)}</p>${btn('Retry','morning-refresh')}`,btn('Read Later','close'));}
+}
+async function morningAction(action,button){
+ if(action==='morning-report'){await morningReport();return;}
+ if(action==='morning-day'){const next=Number(button.dataset.day);if(!Number.isInteger(next)||next<0||next>6)return;if($('#modal form[data-dirty="true"]')&&!confirm('Discard your unsaved message?'))return;morningDaysBack=next;morningPage=1;$('#modal form[data-form="morning-message"]')?.reset();}
+ if(action==='morning-delete'){if(!confirm('Delete this K.I.V. message for all users?'))return;await rpc('morning_message_delete',{id:button.dataset.id});}
+ if(action==='morning-page')morningPage=Number(button.dataset.page);
+ if(action==='morning-ok'){
+  if(!morningData)return;
+  if(morningDaysBack>0){closeModal(true);return;}
+  await rpc('morning_ack',{period_start:morningData.period_start});closeModal(true);return;
+ }
+ await loadMorning();
+}
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&morningData&&$('#modal').open)void loadMorning();});
+
+
+'use strict';
+const reliability=(op,payload={})=>call('reliability',{op,payload});
+const R={page:1,mode:'sessions',area:null,items:[]};
+async function reliabilityList(mode=R.mode,page=1){
+ const epoch=S.epoch;R.mode=mode;R.page=page;
+ const result=await reliability(mode,{page,...(R.area&&mode==='span_list'?{area_id:R.area}:{})});
+ if(epoch!==S.epoch||!S.session)return;
+ R.items=result.items||[];
+ const title={sessions:'Devices & sessions',archive:'Archived profiles',history:'Change history',span_list:'Span of Control'}[mode];
+ modal(title,`${mode==='span_list'?'<p>Assignments are explicitly recorded. No supervisor is inferred from Function / Role.</p>'+btn('Assign person','span-edit'):''}${R.items.map(x=>mode==='sessions'?sessionCard(x):`<section class="tile"><strong>${esc(x.name||x.officer||x.actor||'Session')}</strong><p>${esc(x.reference||x.device||x.action||'')}</p>${mode==='sessions'?`<small>${esc(x.created_at)} ${x.current?'· This session':''}</small>${btn('Revoke access','rel-revoke',`data-id="${esc(x.id)}" data-current="${!!x.current}"`)}`:mode==='archive'?`<p>Archived ${esc(x.deleted_at)} · ${esc(x.approval_state)}</p>${btn('Restore','rel-restore',`data-id="${esc(x.id)}" data-version="${x.version}"`)}`:mode==='history'?`<p>${esc(x.time)} · ${esc(x.target)}</p><details><summary>Changed fields</summary><pre class="notes">${esc(JSON.stringify(x.details,null,2))}</pre></details>`:`<p>${esc(x.role||'Role not recorded')} · ${x.supervisor? 'Supervisor: '+esc(x.supervisor):'Unassigned supervisor'}</p><p>Reviewed ${esc(x.reviewed_at)} · ${esc(x.source)}</p>${btn('Edit','span-edit',`data-id="${esc(x.id)}"`)}${btn('Remove assignment','span-remove',`data-id="${esc(x.id)}" data-version="${x.version}"`)}`}</section>`).join('')||'<p>No entries.</p>'}`,`${btn('Previous','rel-page',`data-page="${page-1}" ${page<=1?'disabled':''}`)}<span>Page ${page}</span>${btn('Next','rel-page',`data-page="${page+1}" ${R.items.length<50?'disabled':''}`)}`);
+}
+async function verificationForm(){const p=S.selected;if(!p)return;const v=await reliability('verification',{id:p.id});if(!S.session||S.selected?.id!==p.id)return;modal('Record verification',`<p>${esc(p.name)}</p><p>Last reviewed: ${esc(v.reviewed_at||'Never')} · Officer ${esc(v.officer||'Not recorded')}</p>${canEdit(p)?`<form data-form="verification">${formError()}${field('Review status',select('status',['Unverified','Reported','Confirmed','Needs review'],v.status||'Unverified'))}${field('Source / reference',input('source',v.source||'','text','required maxlength="500"'))}<button type="submit">Save review</button></form>`:`<p>${esc(v.status||'Unverified')}</p><p>${esc(v.source||'No source recorded')}</p>`}`);}
+async function spanForm(id,candidate){const x=R.items.find(x=>x.id===id)||candidate;modal('Span of Control assignment',`<p>Use the profile ID shown in its details. Leave supervisor blank when no reporting relationship is confirmed.</p><form data-form="span-assignment">${formError()}${field('Find a person',input('person_query','','search','placeholder="Name or alias"'))}${btn('Search profiles','span-search')}<div id="span-candidates"></div>${x?`<p>Selected: ${esc(x.name)}</p>`:''}${field('Person ID',input('id',x?.id,'text',`required ${x?'readonly':''}`))}${field('Supervisor',`<select name="supervisor_id">${option('','Unassigned',x?.supervisor_id)}${R.items.filter(p=>p.id!==id).map(p=>option(p.id,p.name,x?.supervisor_id)).join('')}</select>`)}${field('Source / reference',input('source',x?.source,'text','required maxlength="500"'))}${input('version',x?.version||0,'hidden')}<button type="submit">Save assignment</button></form>`);}
+document.addEventListener('click',async e=>{const b=e.target.closest('[data-action]');if(!b||b.disabled)return;const a=b.dataset.action;if(!['rel-sessions','rel-history','rel-archive','rel-revoke','rel-restore','rel-page','verification','rel-span','span-edit','span-remove','about','export-profile','check-duplicates','span-search','span-choose'].includes(a))return;b.disabled=true;try{
+ if(a==='span-search'){const q=$('[name=person_query]').value.trim();if(q.length<3)throw Error('Enter at least three characters');const result=await rpc('records',{q,page_size:20});const el=$('#span-candidates');if(el)el.innerHTML=result.items.map(p=>btn(esc(p.name)+' · '+esc(p.reference),'span-choose',`data-id="${esc(p.id)}" data-name="${esc(p.name)}"`)).join('')||'<p>No matches.</p>';}
+ else if(a==='span-choose')await spanForm(b.dataset.id,{id:b.dataset.id,name:b.dataset.name,version:0});
+ else if(a==='check-duplicates'){const p=S.selected;const r=await reliability('duplicates',{id:p.id,name:p.name,alias:p.alias,dob:p.dob});modal('Possible duplicate profiles',r.items.map(x=>`<p>${esc(x.name)} · ${esc(x.reference)} · ${esc(x.dob)}</p>`).join('')||'<p>No matches found. This does not establish a unique identity.</p>');}
+ else if(a==='export-profile'){if(!admin())return;const r=await call('exportProfile',{id:S.selected.id});if(r.saved)toast('Profile summary downloaded');}
+ else if(a==='rel-sessions')await reliabilityList('sessions');
+ else if(a==='rel-history')await reliabilityList('history');
+ else if(a==='rel-archive')await reliabilityList('archive');
+ else if(a==='rel-page')await reliabilityList(R.mode,Number(b.dataset.page));
+ else if(a==='verification')await verificationForm();
+ else if(a==='rel-span'){R.area=G.area.id;await reliabilityList('span_list');}
+ else if(a==='span-edit')await spanForm(b.dataset.id);
+ else if(a==='span-remove'){if(confirm('Remove this assignment?')){await reliability('span_remove',{area_id:R.area,id:b.dataset.id,version:Number(b.dataset.version)});await reliabilityList();}}
+ else if(a==='rel-revoke'){if(confirm(`Sign out ${R.items.find(x=>x.id===b.dataset.id)?.user_name||'this user'} on ${R.items.find(x=>x.id===b.dataset.id)?.device_name||'this device'}? They will need to sign in again.`)){await reliability('session_revoke',{id:b.dataset.id});if(b.dataset.current==='true')await call('logout');else await reliabilityList();}}
+ else if(a==='rel-restore'){if(confirm('Restore this profile? Its previous approval status will be retained.')){await reliability('restore',{id:b.dataset.id,version:Number(b.dataset.version)});await reliabilityList();}}
+ else if(a==='about'){const info=await call('buildInfo');modal('About Rogues Gallery™',`<p>Windows ${esc(info.version)}</p><p>Build source date: ${esc(info.buildDate)}</p><p>${esc(info.notes)}</p><p>${info.update?.version?'Available: Windows '+esc(info.update.version)+' · '+esc(info.update.channel):esc(info.update?.message||'Update status unavailable')}</p><p>${esc(info.update?.notes||'')}</p>`);}
+}catch(err){toast(err.message);}finally{b.disabled=false;}});
+document.addEventListener('submit',async e=>{const f=e.target;if(!['verification','span-assignment'].includes(f.dataset.form))return;e.preventDefault();const button=f.querySelector('button[type=submit]');if(f.dataset.saving)return;f.dataset.saving='true';button.disabled=true;const b=Object.fromEntries(new FormData(f));try{if(f.dataset.form==='verification'){await reliability('verify',{...b,id:S.selected.id,version:S.selected.version});await openProfile(S.selected.id);}else{await reliability('span_save',{...b,version:Number(b.version),area_id:R.area});await reliabilityList('span_list');}}catch(err){errorIn(f,err);}finally{delete f.dataset.saving;button.disabled=false;}});
+
+function sessionDate(value){
+ if(!value||!Number.isFinite(Date.parse(value)))return 'Not available';
+ return new Intl.DateTimeFormat('en-GB',{timeZone:'America/Port_of_Spain',day:'2-digit',month:'2-digit',year:'numeric',hour:'numeric',minute:'2-digit',hour12:true}).format(new Date(value))+' (T&T)';
+}
+function sessionCard(x){return `<section class="tile"><h3>${esc(x.device_name||'Device details unavailable')}</h3>
+ ${x.current?'<p class="badge">This device · current sign-in</p>':''}
+ <p>User: ${esc(x.user_name||'Name unavailable')}</p>
+ ${x.officer?`<p>Regimental number: ${esc(x.officer)}</p>`:''}
+ ${x.user_role?`<p>Role: ${esc(x.user_role)}</p>`:''}
+ <p>App version: ${esc(x.app_version||'Not available')}</p>
+ <p>Signed in: ${esc(sessionDate(x.created_at))}</p><p>Session refreshed: ${esc(sessionDate(x.updated_at))}</p>
+ ${btn(x.current?'Sign out here':'Sign out this device','rel-revoke',`data-id="${esc(x.id)}" data-current="${!!x.current}"`)}</section>`;}
