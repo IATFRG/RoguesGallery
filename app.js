@@ -67,6 +67,10 @@ async function loadOptions(){const results=await Promise.allSettled([rpc('gangs'
 
 login();
 function syncText(){return S.lastSync?'Profiles last synced '+S.lastSync.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}):'Profiles have not synced in this session';}
+function poiPeriodDate(value){
+ const match=/^(\d{2})\/(\d{2})\/(\d{2}|\d{4})$/.exec(value||'');
+ return match?match[1]+'/'+match[2]+'/'+(match[3].length===2?'20'+match[3]:match[3]):(value||'—');
+}
 function poiRecordsMarkup(result){
  const records=result.items||[],selected=result.selected_date||S.poi.date||new Date().toISOString().slice(0,10);
  const rows=records.map((r,i)=>{
@@ -77,9 +81,12 @@ function poiRecordsMarkup(result){
   const action=canEdit()?(editing?'<form id="'+formId+'" data-form="poi-record-save" class="poi-record-save">'+input('id',r.id,'hidden')+'<button type="submit" class="plain">Save</button></form>':btn('Edit','poi-edit','data-id="'+esc(r.id)+'"','plain')):'';
   return '<tr><td>'+esc(r.number||i+1)+'</td><td>'+esc(r.date||'—')+'</td><td>'+esc(r.time||'—')+'</td><td>'+location+'</td><td>'+(r.profile_name&&r.record_id?btn(esc(r.profile_name),'open','data-id=\"'+esc(r.record_id)+'\"','plain poi-profile-link'):esc(r.profile_name||'Not recorded'))+'</td><td>'+esc(r.reason||'')+'</td><td>'+esc(r.recorded_by||'Not recorded')+'</td><td>'+diary+'</td><td>'+action+'</td></tr>';
  }).join('');
- return '<div class="section-head"><div><h1>P.O.I Records</h1><p>Records for '+esc(result.week_start||'')+' to '+esc(result.week_end||'')+'</p></div>'+btn('Back to P.O.I.','nav','data-view="poi"')+'</div>'+
-  '<form data-form="poi-records" class="search-panel"><div class="filters">'+field('View records',input('date',selected,'date','required'))+field('Sort by','<select name="sort">'+option('date','Date',S.poi.sort)+option('recorded_by','Recorded By',S.poi.sort)+option('name','Name',S.poi.sort)+'</select>')+'</div><button type="submit" class="primary">View records</button></form>'+
-  '<div class="poi-table-wrap"><table class="poi-table"><thead><tr><th>Number</th><th>Date</th><th>Time</th><th>Location</th><th>Name</th><th>Nature / Reason for Interaction</th><th>Recorded By</th><th>Diary Reference</th><th></th></tr></thead><tbody>'+(rows||'<tr><td colspan="9">No P.O.I. records were created during this Sunday–Saturday period.</td></tr>')+'</tbody></table></div>';
+ return '<div class="section-head poi-records-screen-header"><div><h1>Priority Offenders Interaction Records</h1><p>Choose a Sunday–Saturday reporting period, then print the formal record.</p></div><div class="poi-records-actions">'+btn('Print document','poi-print','','secondary')+btn('Back to P.O.I.','nav','data-view="poi"')+'</div></div>'+
+  '<form data-form="poi-records" class="search-panel poi-records-controls"><div class="filters">'+field('View records',input('date',selected,'date','required'))+field('Sort by','<select name="sort">'+option('date','Date',S.poi.sort)+option('recorded_by','Recorded By',S.poi.sort)+option('name','Name',S.poi.sort)+'</select>')+'</div><button type="submit" class="primary">View records</button></form>'+
+  '<section class="poi-print-document"><header class="poi-print-masthead"><div class="poi-print-brand"><strong>TRINIDAD AND TOBAGO POLICE SERVICE</strong><span>Intelligence &amp; Analysis Task Force</span></div><div class="poi-print-classification">CONFIDENTIAL — OFFICIAL USE</div></header>'+
+  '<div class="poi-print-title"><h1>Priority Offenders Interaction Records</h1><p>Interactions for the Period <strong>'+esc(poiPeriodDate(result.week_start))+'</strong> to <strong>'+esc(poiPeriodDate(result.week_end))+'</strong></p></div>'+
+  '<div class="poi-table-wrap"><table class="poi-table"><thead><tr><th>Number</th><th>Date</th><th>Time</th><th>Location</th><th>Name</th><th>Nature / Reason for Interaction</th><th>Recorded By</th><th>Diary Reference</th><th class="poi-record-actions"></th></tr></thead><tbody>'+(rows||'<tr><td colspan="9">No P.O.I. records were created during this Sunday–Saturday period.</td></tr>')+'</tbody></table></div>'+
+  '<footer class="poi-print-footer"><span>Priority Offenders Interaction Records</span><span>TTPS IATF — Confidential</span></footer></section>';
 }
 
 async function render(){
@@ -203,6 +210,7 @@ async function action(button){if(button.dataset.action==='draft-note'){appendDra
  else if(a==='history-page'){H.page=Number(button.dataset.page);await render();}
  else if(a==='account-number'){const number=prompt('Verified regimental number',button.dataset.number||'');if(number!==null){await rpc('member_number',{id,service_number:number.trim()});await render();}}
  else if(a==='poi-edit'){S.poi.editing=button.dataset.id;await render();}
+ else if(a==='poi-print'){window.print();}
  else if(a==='nav-toggle'){const group=button.dataset.navGroup;S.nav||={};S.nav[group]=!S.nav[group];shell();await render();}
  else if(a==='nav'){if($('#modal').open&&!closeModal())return;if(button.dataset.view==='gnet'){G.gang=null;G.area=null;G.span=false;}S.view=button.dataset.view;if(S.view==='requests'){H.view='menu';H.reviewer='';H.page=1;}S.page=1;S.filters={};await render();}
  else if(a.startsWith('gnet-'))await gnetAction(a,button);
