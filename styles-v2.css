@@ -122,3 +122,13 @@ nav .nav-submenu button svg{width:18px;height:18px}
  nav .nav-submenu button{flex-direction:row;justify-content:flex-start;min-width:0;padding:10px 12px;font-size:13px}
  .poi-diary-form{min-width:210px}
 }
+
+
+/* Per-row P.O.I. edit mode: fields stay read-only until Edit is selected. */
+.poi-table td select[form],.poi-table td input[form]{min-width:150px;max-width:240px;padding:8px 10px}
+.poi-table td input[id^="poi-new-location-"]{display:block;margin-top:8px}
+.poi-record-save{display:flex;justify-content:flex-end}
+.poi-record-save button{min-width:70px}
+@media(max-width:680px){
+ .poi-table td select[form],.poi-table td input[form]{min-width:190px}
+}
