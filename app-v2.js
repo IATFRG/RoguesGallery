@@ -5,7 +5,7 @@ const icon=name=>`<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${paths[n
 const btn=(text,action,extra='',cls='')=>`<button type="button" data-action="${action}" ${extra} class="${cls}">${text}</button>`;
 const cautions=['Murder','Sexual offender','Drug offender','Traffic offender','Robbery offender','Violent','Wanted','Firearm Offender','Malicious Damage','Assault'];
 const flags=['Outstanding Warrant','Dangerous','Wounded','Killed','Released from Prison','Other'];
-const S={session:null,view:'home',page:1,filters:{},gangs:['No Affiliation','Six','Seven','1800s','ABG','Others'],roles:[],shoe:{label:'Area From',options:[]},config:{},epoch:0,photos:new Map(),selected:null,lastSync:null,busy:false};
+const S={session:null,view:'home',page:1,filters:{},poi:{date:'',sort:'date'},gangs:['No Affiliation','Six','Seven','1800s','ABG','Others'],roles:[],shoe:{label:'Area From',options:[]},config:{},epoch:0,photos:new Map(),selected:null,lastSync:null,busy:false};
 let modalRequest=0,renderSequence=0,photoPaint=0,toastTimer,loginMfa=false,cropImage=null,cropSlot=null,draft=null;
 const admin=()=>S.session?.member?.role==='admin';
 const canEdit=p=>['admin','editor'].includes(S.session?.member?.role);
@@ -55,20 +55,34 @@ function login(notice=''){
 }
 function shell(){
  const name=S.session.user?.displayName||S.session.member.service_number||'Account';
- $('#app').innerHTML=`<header class="header"><img src="logo.png" alt="TTPS crest"><div class="brand"><strong>IATF · Rogues Gallery™</strong><small>Trinidad and Tobago Police Service</small></div><div class="account"><small>${esc(name)}</small><span class="badge">${esc(admin()?'Administrator':S.session.member.role)}</span>${btn(icon('out'),'logout','aria-label="Sign out" title="Sign out"','icon-only')}</div></header><div class="layout"><nav aria-label="Main navigation">${[['home','Home'],['poi','P.O.I.'],['gnet','G-Net'],['eforms','E-Forms'],['settings','Settings']].map(([key,label])=>btn(icon(key==='poi'?'user':key)+`<span>${label}</span>`,'nav',`data-view="${key}"`,(key===S.view||(key==='poi'&&['search','card-approvals','saved'].includes(S.view))||(key==='eforms'&&S.view==='fi-form'))?'active':'')).join('')}<div class="nav-foot">Inter-Agency Task Force<br>Web preview</div></nav><main id="content"></main></div>`;
+ $('#app').innerHTML=`<header class="header"><img src="logo.png" alt="TTPS crest"><div class="brand"><strong>IATF · Rogues Gallery™</strong><small>Trinidad and Tobago Police Service</small></div><div class="account"><small>${esc(name)}</small><span class="badge">${esc(admin()?'Administrator':S.session.member.role)}</span>${btn(icon('out'),'logout','aria-label="Sign out" title="Sign out"','icon-only')}</div></header><div class="layout"><nav aria-label="Main navigation">${[['home','Home'],['poi','P.O.I.'],['gnet','G-Net'],['eforms','E-Forms'],['settings','Settings']].map(([key,label])=>btn(icon(key==='poi'?'user':key)+`<span>${label}</span>`,'nav',`data-view="${key}"`,(key===S.view||(key==='poi'&&['search','card-approvals','saved','poi-records'].includes(S.view))||(key==='eforms'&&S.view==='fi-form'))?'active':'')).join('')}<div class="nav-foot">Inter-Agency Task Force<br>Web preview</div></nav><main id="content"></main></div>`;
 }
 async function enter(session){S.session=session;S.view='home';shell();if(session.member.email_required){adminEmail();return;}const epoch=S.epoch;await morningReport(true);if(epoch!==S.epoch||!S.session)return;await loadOptions();await render();}
 async function loadOptions(){const results=await Promise.allSettled([rpc('gangs'),rpc('roles'),rpc('config'),rpc('shoe_settings')]);if(results[0].status==='fulfilled')S.gangs=results[0].value;if(results[1].status==='fulfilled')S.roles=results[1].value;if(results[2].status==='fulfilled')S.config=results[2].value;if(results[3].status==='fulfilled')S.shoe=results[3].value;}
 
 login();
 function syncText(){return S.lastSync?'Profiles last synced '+S.lastSync.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}):'Profiles have not synced in this session';}
+function poiRecordsMarkup(result){
+ const records=result.items||[],selected=result.selected_date||S.poi.date||new Date().toISOString().slice(0,10);
+ const rows=records.map((r,i)=>'<tr><td>'+esc(r.number||i+1)+'</td><td>'+esc(r.date||'—')+'</td><td>'+esc(r.time||'—')+'</td><td>'+esc(r.location||'—')+'</td><td>'+esc(r.profile_name||'Not recorded')+'</td><td>'+esc(r.reason||'')+'</td><td>'+esc(r.recorded_by||'Not recorded')+'</td><td>'+esc(r.diary_reference||'—')+'</td><td>'+btn('Open profile','open','data-id="'+esc(r.record_id)+'"','plain')+'</td></tr>').join('');
+ return '<div class="section-head"><div><h1>P.O.I Records</h1><p>Records for '+esc(result.week_start||'')+' to '+esc(result.week_end||'')+'</p></div>'+btn('Back to P.O.I.','nav','data-view="poi"')+'</div>'+
+  '<form data-form="poi-records" class="search-panel"><div class="filters">'+field('View records',input('date',selected,'date','required'))+field('Sort by','<select name="sort">'+option('date','Date',S.poi.sort)+option('recorded_by','Recorded By',S.poi.sort)+option('name','Name',S.poi.sort)+'</select>')+'</div><button type="submit" class="primary">View records</button></form>'+
+  '<div class="poi-table-wrap"><table class="poi-table"><thead><tr><th>Number</th><th>Date</th><th>Time</th><th>Location</th><th>Name</th><th>Nature / Reason for Interaction</th><th>Recorded By</th><th>Diary Reference</th><th></th></tr></thead><tbody>'+(rows||'<tr><td colspan="9">No P.O.I. records were created during this Sunday–Saturday period.</td></tr>')+'</tbody></table></div>';
+}
+
 async function render(){
  if(!S.session)return;
- const sequence=++renderSequence;document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('active',b.dataset.view===S.view||(b.dataset.view==='poi'&&['search','card-approvals','saved'].includes(S.view))||(b.dataset.view==='eforms'&&S.view==='fi-form')||(b.dataset.view==='settings'&&['general','display','administration','user-management'].includes(S.view))));
+ const sequence=++renderSequence;document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('active',b.dataset.view===S.view||(b.dataset.view==='poi'&&['search','card-approvals','saved','poi-records'].includes(S.view))||(b.dataset.view==='eforms'&&S.view==='fi-form')||(b.dataset.view==='settings'&&['general','display','administration','user-management'].includes(S.view))));
  const main=$('#content');main.innerHTML=loadingCards();
  try{
   await loadOptions();if(sequence!==renderSequence||!S.session)return;
-  if(S.view==='poi'){main.innerHTML=`<h1>P.O.I.</h1>${btn(icon('search')+'Search','nav','data-view="search"')}${['admin','editor'].includes(S.session.member.role)?btn(icon('list')+'Card Approvals','nav','data-view="card-approvals"'):''}${btn(icon('saved')+'Saved','nav','data-view="saved"')}`;return;}
+  if(S.view==='poi'){main.innerHTML=`<h1>P.O.I.</h1>${btn(icon('search')+'Search','nav','data-view="search"')}${btn(icon('list')+'P.O.I Records','nav','data-view="poi-records"')}${['admin','editor'].includes(S.session.member.role)?btn(icon('list')+'Card Approvals','nav','data-view="card-approvals"'):''}${btn(icon('saved')+'Saved','nav','data-view="saved"')}`;return;}
+  if(S.view==='poi-records'){
+   const result=await rpc('poi_records',{date:S.poi.date||'',sort:S.poi.sort});
+   if(sequence!==renderSequence||!S.session)return;
+   main.innerHTML=poiRecordsMarkup(result);
+   return;
+  }
   if(S.view==='eforms'||S.view==='fi-form'){
    if(!admin()){main.innerHTML=comingSoon('E-Forms');return;}
    main.innerHTML=S.view==='eforms'?`<h1>E-Forms</h1>${btn(icon('list')+'FI Form','nav','data-view="fi-form"')}`:`${btn('Back to E-Forms','nav','data-view="eforms"')}${comingSoon('FI Form')}`;return;
@@ -212,6 +226,7 @@ document.addEventListener('submit',async event=>{const f=event.target;if(!f.data
  else if(['register','reset_request','reset_complete'].includes(kind)){const r=await account(kind,b);f.reset();closeModal(true);login(r.message||'Request submitted');}
  else if(kind==='morning-message'){const identity=JSON.stringify([b.message.trim(),b.duration,morningData.period_start]);if(f.dataset.messageBody!==identity){f.dataset.messageKey=crypto.randomUUID();f.dataset.messageBody=identity;}await rpc('morning_message_add',{period_start:morningData.period_start,body:b.message.trim(),client_key:f.dataset.messageKey,duration_hours:Number(b.duration)});f.reset();await loadMorning();}
  else if(kind==='search'){S.filters=b;S.page=1;await render();}
+ else if(kind==='poi-records'){S.poi={date:b.date,sort:['date','recorded_by','name'].includes(b.sort)?b.sort:'date'};await render();}
  else if(kind==='person'){appendDraftNote();const p=S.selected,c=[...new FormData(f).getAll('caution'),...(b.custom_caution?.trim()?[b.custom_caution.trim()]:[])];const payload=draft?.record||{id:p?.id||null,version:p?.version,name:b.name.trim(),alias:b.alias.trim(),dob:b.dob,classification:b.classification||p?.classification||'Standard',status:p?.status||'Under review',description:b.description,data:{...(p?.data||{}),...(!p?{initial_notes:draft?.initialNotes,notes_legacy:draft?.legacyNotes,notes:draft?.notes||''}:{}),marks:b.marks||'',address:b.address.trim(),sex:b.sex,sex_other:b.sex==='other'?(b.sex_other||'').trim():'',shoe_size:f.elements.shoe_size.selectedOptions[0]?.dataset.newArea==='true'?'':b.shoe_size||'',new_area:(b.new_area||'').trim(),caution:[...new Set(c)],gang_affiliation:b.gang_affiliation,gang_other:b.gang_affiliation==='Others'?b.gang_other:'',function_role:b.gang_affiliation==='No Affiliation'?'':b.function_role||''}};let r;
  if(draft&&!draft.record){const matches=await reliability('duplicates',{name:payload.name,alias:payload.alias,dob:payload.dob});if(matches.items?.length&&!confirm('Possible existing profiles:\n'+matches.items.map(x=>x.name+' · '+x.reference+' · '+x.dob).join('\n')+'\nCreate a separate profile anyway?'))return;}
  if(draft){await persistDesktopDraft();const current=draft;current.record ||= payload;await persistDesktopDraft();f.dataset.submitting='true';for(const el of f.elements)if(el!==submit)el.disabled=true;submit.textContent='Saving and uploading…';try{const result=await call('savePerson',{record:current.record,offlineKey:current.key,photos:current.photos.map(p=>({bytes:p.bytes}))});if(!result.complete)throw Error('Profile saved. Some photos still need uploading. '+result.error+' Press Retry to continue.');r=result.record;}catch(e){if(e.creationMayExist===false){current.record=null;for(const el of f.elements)el.disabled=false;updateGangFields();updateSexFields();updateAreaField();await persistDesktopDraft();}throw e;}finally{f.dataset.submitting='false';submit.textContent='Retry save and upload';}}else r=await rpc('record_save',payload);
