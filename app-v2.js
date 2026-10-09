@@ -72,6 +72,31 @@ function poiPeriodDate(value){
  const match=/^(\d{2})\/(\d{2})\/(\d{2}|\d{4})$/.exec(value||'');
  return match?match[1]+'/'+match[2]+'/'+(match[3].length===2?'20'+match[3]:match[3]):(value||'—');
 }
+let poiProfileMatches=new Map(),poiProfileSearchTimer=null,poiProfileSearchSequence=0;
+function poiInteractionForm(){
+ if(!canEdit()){toast('Only an Editor or Administrator can create an interaction.');return;}
+ const now=new Date(),two=n=>String(n).padStart(2,'0'),today=now.getFullYear()+'-'+two(now.getMonth()+1)+'-'+two(now.getDate()),time=two(now.getHours())+':'+two(now.getMinutes()),by=(S.session.user?.displayName||S.session.member?.service_number||'').trim();
+ poiProfileMatches=new Map();
+ modal('Create an Interaction','<form data-form="poi-interaction-create">'+formError()+input('client_key',crypto.randomUUID(),'hidden')+input('record_id','','hidden')+field('Name',input('profile_name','','text','id="poi-profile-name" list="poi-profile-options" autocomplete="off" required maxlength="240" placeholder="Start typing a recorded name"'))+'<datalist id="poi-profile-options"></datalist><p id="poi-profile-hint" class="muted">Start typing to find an authorized profile.</p><div class="form-grid">'+field('Date',input('interaction_date',today,'date','required'))+field('Time',input('interaction_time',time,'time','required'))+field('Location',select('location',S.shoe.options,'','Not recorded'))+field('Base',select('base',poiBases,'','Not recorded'))+'</div>'+field('Nature / Reason for Interaction','<textarea name="reason" required maxlength="1200" placeholder="Record the nature or reason for this interaction"></textarea>',true)+field('Recorded By',input('recorded_by',by,'text','required maxlength="160"'),true)+field('Diary Reference',input('diary_reference','','text','maxlength="160"'),true)+'<button type="submit" class="primary">Save interaction</button></form>',btn('Cancel','close'));
+}
+function schedulePoiProfileSearch(input){
+ const form=input.closest('form[data-form="poi-interaction-create"]');if(!form)return;
+ form.elements.record_id.value=poiProfileMatches.get(input.value.trim())||'';clearTimeout(poiProfileSearchTimer);
+ const list=$('#poi-profile-options'),hint=$('#poi-profile-hint'),query=input.value.trim();
+ if(query.length<2){if(list)list.innerHTML='';if(hint)hint.textContent='Start typing to find an authorized profile.';return;}
+ poiProfileSearchTimer=setTimeout(()=>void lookupPoiProfiles(query),220);
+}
+async function lookupPoiProfiles(query){
+ const request=++poiProfileSearchSequence,list=$('#poi-profile-options'),hint=$('#poi-profile-hint');if(!list||!hint)return;hint.textContent='Searching authorized profiles…';
+ try{
+  const result=await rpc('records',{q:query,page_size:12});
+  if(request!==poiProfileSearchSequence||!$('#poi-profile-options'))return;
+  poiProfileMatches=new Map();
+  list.innerHTML=(result.items||[]).slice(0,12).map(profile=>{let label=[profile.name,profile.alias].filter(Boolean).join(' · ');label+=profile.reference?' · '+profile.reference:'';if(poiProfileMatches.has(label))label+=' · '+String(profile.id).slice(0,8);poiProfileMatches.set(label,profile.id);return '<option value="'+esc(label)+'"></option>';}).join('');
+  const input=$('#poi-profile-name'),form=input?.closest('form');if(form)form.elements.record_id.value=poiProfileMatches.get(input.value.trim())||'';
+  hint.textContent=poiProfileMatches.size?'Choose the matching profile from the suggestions.':'No authorized profiles matched that name.';
+ }catch(error){if(request===poiProfileSearchSequence)hint.textContent='Unable to search profiles right now.';}
+}
 function poiRecordsMarkup(result){
  const records=result.items||[],selected=result.selected_date||S.poi.date||new Date().toISOString().slice(0,10);
  const rows=records.map((r,i)=>{
@@ -83,7 +108,7 @@ function poiRecordsMarkup(result){
   const action=canEdit()?(editing?'<form id="'+formId+'" data-form="poi-record-save" class="poi-record-save">'+input('id',r.id,'hidden')+'<button type="submit" class="plain">Save</button></form>':btn('Edit','poi-edit','data-id="'+esc(r.id)+'"','plain')):'';
   return '<tr><td>'+esc(r.number||i+1)+'</td><td>'+esc(r.date||'—')+'</td><td>'+esc(r.time||'—')+'</td><td>'+location+'</td><td>'+(r.profile_name&&r.record_id?btn(esc(r.profile_name),'open','data-id=\"'+esc(r.record_id)+'\"','plain poi-profile-link'):esc(r.profile_name||'Not recorded'))+'</td><td>'+esc(r.reason||'')+'</td><td>'+esc(r.recorded_by||'Not recorded')+'</td><td>'+base+'</td><td>'+diary+'</td><td>'+action+'</td></tr>';
  }).join('');
- return '<section class="poi-print-document"><header class="poi-print-masthead"><div class="poi-print-brand"><strong>TRINIDAD AND TOBAGO POLICE SERVICE</strong></div><div class="poi-masthead-right"><div class="poi-print-classification">CONFIDENTIAL — OFFICIAL USE</div><div class="poi-print-screen-actions">'+btn('Print document','poi-print','','secondary')+btn(icon('refresh')+'Refresh','poi-refresh','','secondary')+btn('Back to P.O.I.','nav','data-view="poi"')+'</div></div></header>'+
+ return '<section class="poi-print-document"><header class="poi-print-masthead"><div class="poi-print-brand"><strong>TRINIDAD AND TOBAGO POLICE SERVICE</strong></div><div class="poi-masthead-right"><div class="poi-print-classification">CONFIDENTIAL — OFFICIAL USE</div><div class="poi-print-screen-actions">'+btn('Print document','poi-print','','secondary')+btn(icon('refresh')+'Refresh','poi-refresh','','secondary')+btn('Create an Interaction','poi-create-interaction','','primary')+'</div></div></header>'+
   '<form data-form="poi-records" class="poi-records-controls"><div class="poi-records-control poi-records-date">'+field('View records',input('date',selected,'date','required'))+'<button type="submit" class="primary poi-records-apply">Apply</button></div>'+
   '<div class="poi-print-title"><h1>Priority Offenders Interaction Records</h1><p>Interactions for the Period <strong>'+esc(poiPeriodDate(result.week_start))+'</strong> to <strong>'+esc(poiPeriodDate(result.week_end))+'</strong></p></div>'+
   '<div class="poi-records-control poi-records-sort">'+field('Sort by','<select name="sort">'+option('date','Date',S.poi.sort)+option('recorded_by','Recorded By',S.poi.sort)+option('name','Name',S.poi.sort)+'</select>')+'</div></form>'+
@@ -155,6 +180,7 @@ async function editProfile(p=null){S.selected=p;draft=p?null:{key:crypto.randomU
 function updateAreaField(){const f=$('form[data-form="person"]');if(!f)return;const isNew=f.elements.shoe_size.value==='__new_area__';$('#new-area-field').hidden=!isNew;f.elements.new_area.disabled=!isNew;}
 async function persistDesktopDraft(){const f=$('form[data-form="person"]');if(!draft||!f)return;const fields={};for(const el of f.elements)if(el.name&&el.type!=='checkbox'&&el.type!=='file')fields[el.name]=el.value;await call('draft',{op:'save',payload:{key:draft.key,record:draft.record,notes:draft.notes,initialNotes:draft.initialNotes,legacyNotes:draft.legacyNotes,fields,cautions:[...f.querySelectorAll('[name=caution]:checked')].map(e=>e.value),photos:draft.photos.map(p=>({bytes:p.bytes}))}});}
 document.addEventListener('input',e=>{if(e.target.closest('form[data-form="person"]')&&draft)void persistDesktopDraft().catch(error=>errorIn(e.target.closest('form'),error));});
+document.addEventListener('input',e=>{if(e.target.matches('form[data-form="poi-interaction-create"] [name="profile_name"]'))schedulePoiProfileSearch(e.target);});
 document.addEventListener('change',e=>{if(e.target.closest('form[data-form="person"]')&&draft)void persistDesktopDraft().catch(error=>errorIn(e.target.closest('form'),error));});
 function drawDraftPhotos(){const el=$('#draft-photo-previews');if(!el||!draft)return;el.innerHTML=draft.photos.map((p,i)=>`<div><img src="${p.src}" alt="Selected photograph ${i+1}"><small>${i===0?'Display picture':'Photograph '+(i+1)}</small><div class="photo-controls">${i?btn('Make display picture','draft-first',`data-index="${i}"`):''}${btn('Remove','draft-remove',`data-index="${i}"`)}</div></div>`).join('');}
 const readPhoto=file=>new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(Error('Unable to read photograph'));reader.readAsDataURL(file);});
@@ -212,6 +238,7 @@ async function action(button){if(button.dataset.action==='draft-note'){appendDra
  else if(a==='history-page'){H.page=Number(button.dataset.page);await render();}
  else if(a==='account-number'){const number=prompt('Verified regimental number',button.dataset.number||'');if(number!==null){await rpc('member_number',{id,service_number:number.trim()});await render();}}
  else if(a==='poi-edit'){S.poi.editing=button.dataset.id;await render();}
+ else if(a==='poi-create-interaction'){poiInteractionForm();}
  else if(a==='poi-print'){window.print();}
  else if(a==='poi-refresh'){await render();toast('P.O.I. records refreshed');}
  else if(a==='nav-toggle'){const group=button.dataset.navGroup;S.nav||={};S.nav[group]=!S.nav[group];shell();await render();}
@@ -256,6 +283,13 @@ document.addEventListener('submit',async event=>{const f=event.target;if(!f.data
  if(draft&&!draft.record){const matches=await reliability('duplicates',{name:payload.name,alias:payload.alias,dob:payload.dob});if(matches.items?.length&&!confirm('Possible existing profiles:\n'+matches.items.map(x=>x.name+' · '+x.reference+' · '+x.dob).join('\n')+'\nCreate a separate profile anyway?'))return;}
  if(draft){await persistDesktopDraft();const current=draft;current.record ||= payload;await persistDesktopDraft();f.dataset.submitting='true';for(const el of f.elements)if(el!==submit)el.disabled=true;submit.textContent='Saving and uploading…';try{const result=await call('savePerson',{record:current.record,offlineKey:current.key,photos:current.photos.map(p=>({bytes:p.bytes}))});if(!result.complete)throw Error('Profile saved. Some photos still need uploading. '+result.error+' Press Retry to continue.');r=result.record;}catch(e){if(e.creationMayExist===false){current.record=null;for(const el of f.elements)el.disabled=false;updateGangFields();updateSexFields();updateAreaField();await persistDesktopDraft();}throw e;}finally{f.dataset.submitting='false';submit.textContent='Retry save and upload';}}else r=await rpc('record_save',payload);
  f.dataset.dirty='false';if(draft)await call('draft',{op:'clear'}).catch(()=>toast('Profile saved, but the local draft could not be cleared.'));draft=null;if(r.data?.shoe_size&&!S.shoe.options.includes(r.data.shoe_size)){S.shoe.options.push(r.data.shoe_size);S.shoe.options.sort((a,b)=>a.localeCompare(b,undefined,{sensitivity:'base'}));}await openProfile(r.id);void render();toast('Profile saved successfully');}
+ else if(kind==='poi-interaction-create'){
+  const recordId=b.record_id||poiProfileMatches.get((b.profile_name||'').trim());
+  if(!recordId)throw Error('Choose a profile from the authorized name suggestions.');
+  if(!(b.reason||'').trim())throw Error('Enter the nature or reason for the interaction.');
+  await rpc('poi_interaction_create',{record_id:recordId,client_key:b.client_key,interaction_date:b.interaction_date,interaction_time:b.interaction_time,location:b.location||'',base:b.base||'',reason:b.reason.trim(),recorded_by:b.recorded_by.trim(),diary_reference:(b.diary_reference||'').trim()});
+  S.poi={date:b.interaction_date,sort:S.poi.sort||'date',editing:null};closeModal(true);toast('Interaction saved and added to the profile notes.');await render();
+ }
  else if(kind==='poi-record-save'){const location=b.location==='__new_location__'?(b.new_location||'').trim():b.location||'';if(b.location==='__new_location__'&&!location)throw Error('Enter the new area name');if(b.location==='__new_location__')S.shoe=sortShoe(await rpc('shoe_option_add',{name:location}));await rpc('poi_record_save',{id:b.id,location,base:b.base||'',diary_reference:b.diary_reference.trim()});S.poi.editing=null;toast('P.O.I. record saved');await render();}
  else if(kind==='dated-note'&&Array.isArray(S.selected.data?.note_entries)){const p=S.selected;f.dataset.noteKey ||= crypto.randomUUID();await rpc('note_add',{id:p.id,client_key:f.dataset.noteKey,body:b.note.trim()});await openProfile(p.id);}
  else if(kind==='dated-note'){const p=S.selected,n=new Date(),two=x=>String(x).padStart(2,'0'),author=S.session.user?.displayName||S.session.member.service_number||S.session.member.id,entry=`${b.note.trim()} — ${two(n.getUTCHours())}:${two(n.getUTCMinutes())} UTC, ${two(n.getUTCDate())}/${two(n.getUTCMonth()+1)}/${n.getUTCFullYear()} — ${author}`;await rpc('record_save',{id:p.id,version:p.version,name:p.name,alias:p.alias,dob:p.dob,status:p.status,classification:p.classification,description:p.description,data:{...p.data,notes:[p.data?.notes,entry].filter(Boolean).join('\n\n')}});await openProfile(p.id);}
