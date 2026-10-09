@@ -132,3 +132,7 @@ nav .nav-submenu button svg{width:18px;height:18px}
 @media(max-width:680px){
  .poi-table td select[form],.poi-table td input[form]{min-width:190px}
 }
+
+/* P.O.I. profile name link */
+button.poi-profile-link{min-height:0;padding:0;border-radius:0;color:var(--blue);text-decoration:underline;text-underline-offset:2px;font:inherit;font-weight:650}
+button.poi-profile-link:hover{background:transparent;opacity:.78}
