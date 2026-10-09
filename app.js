@@ -66,8 +66,7 @@ function shell(){
 async function enter(session){S.session=session;S.view='home';shell();if(session.member.email_required){adminEmail();return;}const epoch=S.epoch;await morningReport(true);if(epoch!==S.epoch||!S.session)return;await loadOptions();await render();}
 async function loadOptions(){const results=await Promise.allSettled([rpc('gangs'),rpc('roles'),rpc('config'),rpc('shoe_settings')]);if(results[0].status==='fulfilled')S.gangs=results[0].value;if(results[1].status==='fulfilled')S.roles=results[1].value;if(results[2].status==='fulfilled')S.config=results[2].value;if(results[3].status==='fulfilled')S.shoe=sortShoe(results[3].value);}
 
-async function boot(){const restored=await window.iatf.call('restore');if(restored.ok&&restored.data?.session){await enter(restored.data.session);return;}login();}
-void boot();
+login();
 function syncText(){return S.lastSync?'Profiles last synced '+S.lastSync.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}):'Profiles have not synced in this session';}
 function poiPeriodDate(value){
  const match=/^(\d{2})\/(\d{2})\/(\d{2}|\d{4})$/.exec(value||'');
