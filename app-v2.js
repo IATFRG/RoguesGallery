@@ -83,7 +83,7 @@ function poiRecordsMarkup(result){
   const action=canEdit()?(editing?'<form id="'+formId+'" data-form="poi-record-save" class="poi-record-save">'+input('id',r.id,'hidden')+'<button type="submit" class="plain">Save</button></form>':btn('Edit','poi-edit','data-id="'+esc(r.id)+'"','plain')):'';
   return '<tr><td>'+esc(r.number||i+1)+'</td><td>'+esc(r.date||'—')+'</td><td>'+esc(r.time||'—')+'</td><td>'+location+'</td><td>'+(r.profile_name&&r.record_id?btn(esc(r.profile_name),'open','data-id=\"'+esc(r.record_id)+'\"','plain poi-profile-link'):esc(r.profile_name||'Not recorded'))+'</td><td>'+esc(r.reason||'')+'</td><td>'+esc(r.recorded_by||'Not recorded')+'</td><td>'+base+'</td><td>'+diary+'</td><td>'+action+'</td></tr>';
  }).join('');
- return '<section class="poi-print-document"><header class="poi-print-masthead"><div class="poi-print-brand"><strong>TRINIDAD AND TOBAGO POLICE SERVICE</strong></div><div class="poi-masthead-right"><div class="poi-print-classification">CONFIDENTIAL — OFFICIAL USE</div><div class="poi-print-screen-actions">'+btn('Print document','poi-print','','secondary')+btn('Back to P.O.I.','nav','data-view="poi"')+'</div></div></header>'+
+ return '<section class="poi-print-document"><header class="poi-print-masthead"><div class="poi-print-brand"><strong>TRINIDAD AND TOBAGO POLICE SERVICE</strong></div><div class="poi-masthead-right"><div class="poi-print-classification">CONFIDENTIAL — OFFICIAL USE</div><div class="poi-print-screen-actions">'+btn('Print document','poi-print','','secondary')+btn(icon('refresh')+'Refresh','poi-refresh','','secondary')+btn('Back to P.O.I.','nav','data-view="poi"')+'</div></div></header>'+
   '<form data-form="poi-records" class="poi-records-controls"><div class="poi-records-control poi-records-date">'+field('View records',input('date',selected,'date','required'))+'<button type="submit" class="primary poi-records-apply">Apply</button></div>'+
   '<div class="poi-print-title"><h1>Priority Offenders Interaction Records</h1><p>Interactions for the Period <strong>'+esc(poiPeriodDate(result.week_start))+'</strong> to <strong>'+esc(poiPeriodDate(result.week_end))+'</strong></p></div>'+
   '<div class="poi-records-control poi-records-sort">'+field('Sort by','<select name="sort">'+option('date','Date',S.poi.sort)+option('recorded_by','Recorded By',S.poi.sort)+option('name','Name',S.poi.sort)+'</select>')+'</div></form>'+
@@ -213,6 +213,7 @@ async function action(button){if(button.dataset.action==='draft-note'){appendDra
  else if(a==='account-number'){const number=prompt('Verified regimental number',button.dataset.number||'');if(number!==null){await rpc('member_number',{id,service_number:number.trim()});await render();}}
  else if(a==='poi-edit'){S.poi.editing=button.dataset.id;await render();}
  else if(a==='poi-print'){window.print();}
+ else if(a==='poi-refresh'){await render();toast('P.O.I. records refreshed');}
  else if(a==='nav-toggle'){const group=button.dataset.navGroup;S.nav||={};S.nav[group]=!S.nav[group];shell();await render();}
  else if(a==='nav'){if($('#modal').open&&!closeModal())return;if(button.dataset.view==='gnet'){G.gang=null;G.area=null;G.span=false;}S.view=button.dataset.view;if(S.view==='requests'){H.view='menu';H.reviewer='';H.page=1;}S.page=1;S.filters={};await render();}
  else if(a.startsWith('gnet-'))await gnetAction(a,button);
