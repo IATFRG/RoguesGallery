@@ -99,3 +99,26 @@ h1{font-weight:750;letter-spacing:-.5px}h2,h3{font-weight:700}
 .poi-table th{background:var(--surface-strong);white-space:nowrap}
 .poi-table tbody tr:last-child td{border-bottom:0}
 .poi-table td:nth-child(6){min-width:280px;white-space:pre-wrap}
+
+
+/* Expandable P.O.I. navigation and editable P.O.I. diary references. */
+nav .nav-group{display:grid;gap:4px}
+nav .nav-group-toggle{width:100%;position:relative}
+nav .nav-group-toggle .nav-chevron{margin-left:auto;font-size:18px;transition:transform .15s ease}
+nav .nav-group-toggle[aria-expanded="true"] .nav-chevron{transform:rotate(180deg)}
+nav .nav-group-toggle.active{background:var(--selected);color:var(--blue);box-shadow:inset 3px 0 var(--blue)}
+nav .nav-submenu{display:grid;gap:3px;padding:0 0 5px 20px}
+nav .nav-submenu button{min-height:40px;padding:10px 14px;font-size:14px;font-weight:600}
+nav .nav-submenu button svg{width:18px;height:18px}
+.poi-diary-form{display:flex;align-items:center;gap:7px;min-width:190px}
+.poi-diary-form input{min-width:120px;width:100%;padding:8px 10px}
+.poi-diary-form button{padding:8px 10px;white-space:nowrap}
+.poi-table td>input[readonly]{min-width:120px;width:100%;padding:8px 10px;color:var(--ink);opacity:1}
+@media(max-width:680px){
+ nav .nav-group{position:relative;flex:1;min-width:0}
+ nav .nav-group-toggle{min-width:0}
+ nav .nav-group-toggle .nav-chevron{display:none}
+ nav .nav-submenu{position:absolute;left:0;bottom:68px;z-index:4;min-width:180px;padding:8px;background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow)}
+ nav .nav-submenu button{flex-direction:row;justify-content:flex-start;min-width:0;padding:10px 12px;font-size:13px}
+ .poi-diary-form{min-width:210px}
+}
