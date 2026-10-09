@@ -92,7 +92,9 @@ async function lookupPoiProfiles(query){
   const result=await rpc('records',{q:query,page_size:12});
   if(request!==poiProfileSearchSequence||!$('#poi-profile-options'))return;
   poiProfileMatches=new Map();
-  list.innerHTML=(result.items||[]).slice(0,12).map(profile=>{let label=[profile.name,profile.alias].filter(Boolean).join(' · ');label+=profile.reference?' · '+profile.reference:'';if(poiProfileMatches.has(label))label+=' · '+String(profile.id).slice(0,8);poiProfileMatches.set(label,profile.id);return '<option value="'+esc(label)+'"></option>';}).join('');
+  const nameQuery=query.toLocaleLowerCase();
+  const names=(result.items||[]).filter(profile=>String(profile.name||'').toLocaleLowerCase().includes(nameQuery)).slice(0,12);
+  list.innerHTML=names.map(profile=>{const label=String(profile.name||'').trim();if(!label||poiProfileMatches.has(label))return '';poiProfileMatches.set(label,profile.id);return '<option value="'+esc(label)+'"></option>';}).join('');
   const input=$('#poi-profile-name'),form=input?.closest('form');if(form)form.elements.record_id.value=poiProfileMatches.get(input.value.trim())||'';
   hint.textContent=poiProfileMatches.size?'Choose the matching profile from the suggestions.':'No authorized profiles matched that name.';
  }catch(error){if(request===poiProfileSearchSequence)hint.textContent='Unable to search profiles right now.';}
