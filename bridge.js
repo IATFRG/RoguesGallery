@@ -7,13 +7,11 @@
 (() => {
   const base='https://gjygzojrjurenuhrobes.supabase.co';
   const key='sb_publishable_qKN45lGN8IXX6ct7fj2ksw_2m_L1O7d';
-  let token=null, refreshToken=null, expiresAt=0, pending=null, lastActive=0;
-  const sessionStorageKey='iatf.web.session.v1';
-  const clearStoredSession=()=>{try{sessionStorage.removeItem(sessionStorageKey);localStorage.removeItem(sessionStorageKey);}catch{}};
-  const persistSession=()=>{if(!refreshToken)return;try{sessionStorage.setItem(sessionStorageKey,JSON.stringify({refresh_token:refreshToken}));}catch{}};
-  const applyAuth=auth=>{token=auth.access_token;refreshToken=auth.refresh_token||refreshToken;expiresAt=Date.now()+Number(auth.expires_in||3600)*1000;lastActive=Date.now();persistSession();};
+  let token=null, expiresAt=0, pending=null, lastActive=0;
+  // Clear a token saved by earlier web versions; this client keeps no browser token.
+  try{localStorage.removeItem('iatf.web.session.v1');sessionStorage.removeItem('iatf.web.session.v1');}catch{}
   const locks=new Set();
-  const lock=reason => { token=null; refreshToken=null; expiresAt=0; pending=null; clearStoredSession(); locks.forEach(fn=>fn(reason)); };
+  const lock=reason => { token=null; expiresAt=0; pending=null; locks.forEach(fn=>fn(reason)); };
   const active=() => {
     if (!token || Date.now() >= expiresAt || Date.now()-lastActive >= 300000) {
       lock('Your session has locked. Sign in again.');
@@ -53,7 +51,7 @@
     const auth=await request('/functions/v1/iatf-accounts',{auth:false,body:{op:'login',identifier:String(payload.identifier||'').trim(),password:String(payload.password||'')}});
     const factor=auth?.user?.factors?.find(f=>f.status==='verified'&&f.factor_type==='totp');
     if(factor){ pending={token:auth.access_token,factor:factor.id,until:Date.now()+180000}; return {mfa_required:true}; }
-    applyAuth(auth); return await session(token);
+    const result=await session(auth.access_token); expiresAt=Date.now()+Number(auth.expires_in||3600)*1000; return result;
   };
   const mfa=async payload => {
     if(!pending||Date.now()>pending.until||!/^[0-9]{6}$/.test(payload.code||'')) throw Object.assign(Error('Enter a valid six-digit authenticator code.'),{status:401});
@@ -62,21 +60,8 @@
     try {
       const challenge=await request('/auth/v1/factors/'+encodeURIComponent(p.factor)+'/challenge',{body:{}});
       const auth=await request('/auth/v1/factors/'+encodeURIComponent(p.factor)+'/verify',{body:{challenge_id:challenge.id,code:payload.code}});
-      applyAuth(auth); const result=await session(token); pending=null; return result;
+      const result=await session(auth.access_token); expiresAt=Date.now()+Number(auth.expires_in||3600)*1000; pending=null; return result;
     } finally { if(!token) token=temporary; }
-  };
-  const restore=async () => {
-    let saved;
-    try { saved=JSON.parse(sessionStorage.getItem(sessionStorageKey)||'null'); } catch { clearStoredSession(); return null; }
-    if(!saved?.refresh_token) return null;
-    try {
-      const auth=await request('/auth/v1/token?grant_type=refresh_token',{auth:false,body:{refresh_token:String(saved.refresh_token)}});
-      applyAuth(auth);
-      return await session(token);
-    } catch {
-      token=null; refreshToken=null; expiresAt=0; clearStoredSession();
-      return null;
-    }
   };
   const account=async (op,payload) => request('/functions/v1/iatf-accounts',{auth:['review','admin_email'].includes(op),body:{...payload,op}});
   const uploadPhoto=async ({id,version,slot,bytes}) => {
@@ -108,8 +93,7 @@
     async call(action,payload={}) {
       try {
         let data;
-        if(action==='restore') data=await restore();
-        else if(action==='login') data=await login(payload);
+        if(action==='login') data=await login(payload);
         else if(action==='mfa') data=await mfa(payload);
         else if(action==='logout') { if(token) await request('/auth/v1/logout?scope=local',{body:{}}).catch(()=>{}); lock(''); data={ok:true}; }
         else if(action==='activity') { active(); data={ok:true}; }
