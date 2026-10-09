@@ -188,3 +188,15 @@ button.poi-profile-link{color:#1e5d96}
  .poi-print-document .poi-table button,.poi-print-document .poi-table input,.poi-print-document .poi-table select{display:none}
  .poi-print-document .poi-print-footer{margin-top:10px;padding-top:8px}
 }
+
+
+/* P.O.I. Base column and compact number column. */
+.poi-print-document .poi-table{min-width:1140px}
+.poi-print-document .poi-table th:first-child,.poi-print-document .poi-table td:first-child{width:46px;min-width:46px;padding-left:7px;padding-right:7px}
+.poi-print-document .poi-table th:nth-child(8),.poi-print-document .poi-table td:nth-child(8){min-width:116px;white-space:nowrap}
+.poi-print-document .poi-table td:nth-child(10){text-align:right}
+.poi-table td select[form][name="base"]{min-width:150px}
+@media print{
+ .poi-print-document .poi-table th:first-child,.poi-print-document .poi-table td:first-child{width:32px;min-width:32px;padding-left:4px;padding-right:4px}
+ .poi-print-document .poi-table th:nth-child(8),.poi-print-document .poi-table td:nth-child(8){min-width:76px}
+}
