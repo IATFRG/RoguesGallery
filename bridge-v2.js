@@ -9,8 +9,8 @@
   const key='sb_publishable_qKN45lGN8IXX6ct7fj2ksw_2m_L1O7d';
   let token=null, refreshToken=null, expiresAt=0, pending=null, lastActive=0;
   const sessionStorageKey='iatf.web.session.v1';
-  const clearStoredSession=()=>{try{localStorage.removeItem(sessionStorageKey);}catch{}};
-  const persistSession=()=>{if(!refreshToken)return;try{localStorage.setItem(sessionStorageKey,JSON.stringify({refresh_token:refreshToken}));}catch{}};
+  const clearStoredSession=()=>{try{sessionStorage.removeItem(sessionStorageKey);localStorage.removeItem(sessionStorageKey);}catch{}};
+  const persistSession=()=>{if(!refreshToken)return;try{sessionStorage.setItem(sessionStorageKey,JSON.stringify({refresh_token:refreshToken}));}catch{}};
   const applyAuth=auth=>{token=auth.access_token;refreshToken=auth.refresh_token||refreshToken;expiresAt=Date.now()+Number(auth.expires_in||3600)*1000;lastActive=Date.now();persistSession();};
   const locks=new Set();
   const lock=reason => { token=null; refreshToken=null; expiresAt=0; pending=null; clearStoredSession(); locks.forEach(fn=>fn(reason)); };
@@ -67,7 +67,7 @@
   };
   const restore=async () => {
     let saved;
-    try { saved=JSON.parse(localStorage.getItem(sessionStorageKey)||'null'); } catch { clearStoredSession(); return null; }
+    try { saved=JSON.parse(sessionStorage.getItem(sessionStorageKey)||'null'); } catch { clearStoredSession(); return null; }
     if(!saved?.refresh_token) return null;
     try {
       const auth=await request('/auth/v1/token?grant_type=refresh_token',{auth:false,body:{refresh_token:String(saved.refresh_token)}});
