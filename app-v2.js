@@ -5,7 +5,7 @@ const icon=name=>`<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${paths[n
 const btn=(text,action,extra='',cls='')=>`<button type="button" data-action="${action}" ${extra} class="${cls}">${text}</button>`;
 const cautions=['Murder','Sexual offender','Drug offender','Traffic offender','Robbery offender','Violent','Wanted','Firearm Offender','Malicious Damage','Assault'];
 const flags=['Outstanding Warrant','Dangerous','Wounded','Killed','Released from Prison','Other'];
-const S={session:null,view:'home',page:1,filters:{},poi:{date:'',sort:'date'},nav:{poi:false},gangs:['No Affiliation','Six','Seven','1800s','ABG','Others'],roles:[],shoe:{label:'Area From',options:[]},config:{},epoch:0,photos:new Map(),selected:null,lastSync:null,busy:false};
+const S={session:null,view:'home',page:1,filters:{},poi:{date:'',sort:'date',editing:null},nav:{poi:false},gangs:['No Affiliation','Six','Seven','1800s','ABG','Others'],roles:[],shoe:{label:'Area From',options:[]},config:{},epoch:0,photos:new Map(),selected:null,lastSync:null,busy:false};
 let modalRequest=0,renderSequence=0,photoPaint=0,toastTimer,loginMfa=false,cropImage=null,cropSlot=null,draft=null;
 const admin=()=>S.session?.member?.role==='admin';
 const canEdit=p=>['admin','editor'].includes(S.session?.member?.role);
@@ -70,8 +70,12 @@ function syncText(){return S.lastSync?'Profiles last synced '+S.lastSync.toLocal
 function poiRecordsMarkup(result){
  const records=result.items||[],selected=result.selected_date||S.poi.date||new Date().toISOString().slice(0,10);
  const rows=records.map((r,i)=>{
-  const diary=canEdit()?'<form data-form="poi-diary-reference" class="poi-diary-form">'+input('id',r.id,'hidden')+input('diary_reference',r.diary_reference||'','text','maxlength="120" aria-label="Diary Reference" placeholder="Diary reference"')+'<button type="submit" class="plain">Save</button></form>':'<input value="'+esc(r.diary_reference||'')+'" type="text" aria-label="Diary Reference" placeholder="Not recorded" readonly>';
-  return '<tr><td>'+esc(r.number||i+1)+'</td><td>'+esc(r.date||'—')+'</td><td>'+esc(r.time||'—')+'</td><td>'+esc(r.location||'—')+'</td><td>'+esc(r.profile_name||'Not recorded')+'</td><td>'+esc(r.reason||'')+'</td><td>'+esc(r.recorded_by||'Not recorded')+'</td><td>'+diary+'</td><td>'+btn('Open profile','open','data-id="'+esc(r.record_id)+'"','plain')+'</td></tr>';
+  const editing=canEdit()&&S.poi.editing===r.id;
+  const formId='poi-record-'+r.id;
+  const location=editing?select('location',S.shoe.options,r.location||'','Not recorded').replace('<select ',`<select form="${formId}" data-poi-location="true" data-record-id="${r.id}" `).replace('</select>','<option value="__new_location__">Add new area</option></select>')+'<input form="'+formId+'" id="poi-new-location-'+esc(r.id)+'" name="new_location" maxlength="80" placeholder="New area name" hidden disabled>':'<span>'+esc(r.location||'—')+'</span>';
+  const diary=editing?input('diary_reference',r.diary_reference||'','text',`form="${formId}" maxlength="160" aria-label="Diary Reference" placeholder="Diary reference"`):'<span>'+esc(r.diary_reference||'—')+'</span>';
+  const action=canEdit()?(editing?'<form id="'+formId+'" data-form="poi-record-save" class="poi-record-save">'+input('id',r.id,'hidden')+'<button type="submit" class="plain">Save</button></form>':btn('Edit','poi-edit','data-id="'+esc(r.id)+'"','plain')):'';
+  return '<tr><td>'+esc(r.number||i+1)+'</td><td>'+esc(r.date||'—')+'</td><td>'+esc(r.time||'—')+'</td><td>'+location+'</td><td>'+esc(r.profile_name||'Not recorded')+'</td><td>'+esc(r.reason||'')+'</td><td>'+esc(r.recorded_by||'Not recorded')+'</td><td>'+diary+'</td><td>'+action+'</td></tr>';
  }).join('');
  return '<div class="section-head"><div><h1>P.O.I Records</h1><p>Records for '+esc(result.week_start||'')+' to '+esc(result.week_end||'')+'</p></div>'+btn('Back to P.O.I.','nav','data-view="poi"')+'</div>'+
   '<form data-form="poi-records" class="search-panel"><div class="filters">'+field('View records',input('date',selected,'date','required'))+field('Sort by','<select name="sort">'+option('date','Date',S.poi.sort)+option('recorded_by','Recorded By',S.poi.sort)+option('name','Name',S.poi.sort)+'</select>')+'</div><button type="submit" class="primary">View records</button></form>'+
@@ -198,6 +202,7 @@ async function action(button){if(button.dataset.action==='draft-note'){appendDra
  if(a==='account-nav'){H.view=button.dataset.view;H.reviewer='';H.page=1;await render();}
  else if(a==='history-page'){H.page=Number(button.dataset.page);await render();}
  else if(a==='account-number'){const number=prompt('Verified regimental number',button.dataset.number||'');if(number!==null){await rpc('member_number',{id,service_number:number.trim()});await render();}}
+ else if(a==='poi-edit'){S.poi.editing=button.dataset.id;await render();}
  else if(a==='nav-toggle'){const group=button.dataset.navGroup;S.nav||={};S.nav[group]=!S.nav[group];shell();await render();}
  else if(a==='nav'){if($('#modal').open&&!closeModal())return;if(button.dataset.view==='gnet'){G.gang=null;G.area=null;G.span=false;}S.view=button.dataset.view;if(S.view==='requests'){H.view='menu';H.reviewer='';H.page=1;}S.page=1;S.filters={};await render();}
  else if(a.startsWith('gnet-'))await gnetAction(a,button);
@@ -240,7 +245,7 @@ document.addEventListener('submit',async event=>{const f=event.target;if(!f.data
  if(draft&&!draft.record){const matches=await reliability('duplicates',{name:payload.name,alias:payload.alias,dob:payload.dob});if(matches.items?.length&&!confirm('Possible existing profiles:\n'+matches.items.map(x=>x.name+' · '+x.reference+' · '+x.dob).join('\n')+'\nCreate a separate profile anyway?'))return;}
  if(draft){await persistDesktopDraft();const current=draft;current.record ||= payload;await persistDesktopDraft();f.dataset.submitting='true';for(const el of f.elements)if(el!==submit)el.disabled=true;submit.textContent='Saving and uploading…';try{const result=await call('savePerson',{record:current.record,offlineKey:current.key,photos:current.photos.map(p=>({bytes:p.bytes}))});if(!result.complete)throw Error('Profile saved. Some photos still need uploading. '+result.error+' Press Retry to continue.');r=result.record;}catch(e){if(e.creationMayExist===false){current.record=null;for(const el of f.elements)el.disabled=false;updateGangFields();updateSexFields();updateAreaField();await persistDesktopDraft();}throw e;}finally{f.dataset.submitting='false';submit.textContent='Retry save and upload';}}else r=await rpc('record_save',payload);
  f.dataset.dirty='false';if(draft)await call('draft',{op:'clear'}).catch(()=>toast('Profile saved, but the local draft could not be cleared.'));draft=null;if(r.data?.shoe_size&&!S.shoe.options.includes(r.data.shoe_size)){S.shoe.options.push(r.data.shoe_size);S.shoe.options.sort((a,b)=>a.localeCompare(b,undefined,{sensitivity:'base'}));}await openProfile(r.id);void render();toast('Profile saved successfully');}
- else if(kind==='poi-diary-reference'){await rpc('poi_diary_reference_save',{id:b.id,diary_reference:b.diary_reference.trim()});toast('Diary reference saved');await render();}
+ else if(kind==='poi-record-save'){const location=b.location==='__new_location__'?(b.new_location||'').trim():b.location||'';if(b.location==='__new_location__'&&!location)throw Error('Enter the new area name');if(b.location==='__new_location__')S.shoe=sortShoe(await rpc('shoe_option_add',{name:location}));await rpc('poi_record_save',{id:b.id,location,diary_reference:b.diary_reference.trim()});S.poi.editing=null;toast('P.O.I. record saved');await render();}
  else if(kind==='dated-note'&&Array.isArray(S.selected.data?.note_entries)){const p=S.selected;f.dataset.noteKey ||= crypto.randomUUID();await rpc('note_add',{id:p.id,client_key:f.dataset.noteKey,body:b.note.trim()});await openProfile(p.id);}
  else if(kind==='dated-note'){const p=S.selected,n=new Date(),two=x=>String(x).padStart(2,'0'),author=S.session.user?.displayName||S.session.member.service_number||S.session.member.id,entry=`${b.note.trim()} — ${two(n.getUTCHours())}:${two(n.getUTCMinutes())} UTC, ${two(n.getUTCDate())}/${two(n.getUTCMonth()+1)}/${n.getUTCFullYear()} — ${author}`;await rpc('record_save',{id:p.id,version:p.version,name:p.name,alias:p.alias,dob:p.dob,status:p.status,classification:p.classification,description:p.description,data:{...p.data,notes:[p.data?.notes,entry].filter(Boolean).join('\n\n')}});await openProfile(p.id);}
  else if(kind==='flag'){await rpc('record_flag',{...b,id:S.selected.id,version:S.selected.version});await openProfile(S.selected.id);void render();}
@@ -254,6 +259,14 @@ document.addEventListener('submit',async event=>{const f=event.target;if(!f.data
  else if(kind==='admin-email'){await account('admin_email',b);closeModal(true);await call('logout');login('Email saved. Sign in with your email and existing password.');}
  }catch(e){errorIn(f,e);}finally{f.setAttribute('aria-busy','false');if(status)status.hidden=true;if(submit)submit.disabled=false;}});
 document.addEventListener('input',event=>{const f=event.target.closest('form');if(f&&f.dataset.form!=='login')f.dataset.dirty='true';if(event.target.name==='dob'&&f?.elements.age)f.elements.age.value=age(event.target.value);if(event.target.name==='gang_affiliation')updateGangFields();if(event.target.id.startsWith('crop-'))drawCrop();});
+document.addEventListener('change',event=>{
+ if(event.target.dataset.poiLocation!=='true')return;
+ const id=event.target.dataset.recordId,newLocation=document.getElementById('poi-new-location-'+id);
+ if(!newLocation)return;
+ const adding=event.target.value==='__new_location__';
+ newLocation.hidden=!adding;newLocation.disabled=!adding;newLocation.required=adding;
+ if(!adding)newLocation.value='';
+});
 $('#modal').addEventListener('cancel',event=>{event.preventDefault();closeModal();});
 let lastActivity=0;for(const name of ['pointerdown','keydown','wheel'])document.addEventListener(name,()=>{const now=Date.now();if(S.session&&now-lastActivity>1000){lastActivity=now;void window.iatf.call('activity');}},{passive:true});
 setInterval(async()=>{if(S.session&&!document.hidden)try{await rpc('session');S.photos.clear();const options=await rpc('shoe_settings');const renamed=options.label!==S.shoe.label;S.shoe=sortShoe(options);if(renamed&&!$('#modal').open)void render();}catch(e){if(e.status!==401&&e.status!==403){const sync=$('.sync span');if(sync)sync.textContent='Unable to check server access · '+syncText();}}},30000);
